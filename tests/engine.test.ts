@@ -3,7 +3,7 @@ import { Game } from '../src/engine/game';
 import { BLUE_BASE, RED_BASE, WALLS, collideWalls, dist, lineBlocked } from '../src/engine/map';
 import { createHero, createMinion } from '../src/engine/factory';
 import { addStatus, applyDamage } from '../src/engine/combat';
-import type { Hero, Minion } from '../src/engine/types';
+import type { GameEntity, Hero, Minion, Projectile } from '../src/engine/types';
 
 function makeGame(player = 'emberfang', enemy = 'veilora') {
   return new Game({ mode: 'full', playerHero: player, enemyHero: enemy });
@@ -12,6 +12,13 @@ function makeGame(player = 'emberfang', enemy = 'veilora') {
 function tick(game: Game, seconds: number, step = 0.05) {
   for (let i = 0; i < Math.round(seconds / step); i++) game.update(step);
 }
+
+function stepProjectiles(game: Game, seconds: number, step = 0.05) {
+  const runner = game as unknown as { updateProjectiles: (dt: number) => void };
+  for (let i = 0; i < Math.round(seconds / step); i++) runner.updateProjectiles(step);
+}
+
+const BLOCKADE = { x: 790, y: 430, w: 100, h: 180 };
 
 describe('移动、攻击距离与碰撞', () => {
   it('英雄可以移动且墙体不可穿越', () => {
@@ -247,6 +254,222 @@ describe('草丛、视野和事件', () => {
     event.startsIn = 0.01;
     tick(game, 0.1);
     expect(game.blockade).not.toBeNull();
+  });
+});
+
+describe('弹道连续路径与路线封锁', () => {
+  it('静态墙体会拦截飞行中的弹道且不结算伤害', () => {
+    const game = makeGame('veilora', 'emberfang');
+    const player = game.player;
+    const enemy = game.enemy;
+    player.pos = { x: 840, y: 340 };
+    enemy.pos = { x: 840, y: 200 };
+    expect(game.segmentBlocked(player.pos, enemy.pos)).toBe(true);
+    const projectile: Projectile = {
+      id: 9001, team: 0, pos: { ...player.pos }, targetId: enemy.id, speed: 620,
+      info: { amount: 50, type: 'physical', source: player, sourceSkill: '普攻' },
+      kind: 'attack', sourceId: player.id
+    };
+    game.projectiles.push(projectile);
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(enemy.hp).toBe(enemy.maxHp);
+  });
+
+  it('路线封锁存在时远程普攻无法出手', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.blockade = { ...BLOCKADE };
+    game.player.pos = { x: 700, y: 520 };
+    game.enemy.pos = { x: 950, y: 520 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.hp).toBe(game.enemy.maxHp);
+  });
+
+  it('封锁出现后会拦截已经在空中的弹道', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 600, y: 520 };
+    game.enemy.pos = { x: 930, y: 520 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    expect(game.projectiles.length).toBe(1);
+    game.blockade = { ...BLOCKADE };
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.hp).toBe(game.enemy.maxHp);
+  });
+
+  it('封锁结束后新发射的弹道可以正常通过并命中', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 600, y: 520 };
+    game.enemy.pos = { x: 930, y: 520 };
+    game.blockade = { ...BLOCKADE };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    game.blockade = null;
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    stepProjectiles(game, 1);
+    expect(game.enemy.hp).toBeLessThan(game.enemy.maxHp);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('目标在弹道到达前移动到墙后则最后一段被挡', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 840, y: 380 };
+    game.enemy.pos = { x: 840, y: 320 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    game.enemy.pos = { x: 840, y: 200 };
+    stepProjectiles(game, 1);
+    expect(game.enemy.hp).toBe(game.enemy.maxHp);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('目标在命中前死亡则弹道移除且不结算击杀', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 600, y: 520 };
+    game.enemy.pos = { x: 900, y: 520 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    applyDamage(game, game.enemy, { amount: 99999, type: 'energy' });
+    expect(game.enemy.alive).toBe(false);
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.player.kills).toBe(0);
+    expect(game.kills.length).toBe(1);
+    expect(game.player.damageDealt ?? 0).toBe(0);
+  });
+
+  it('源单位死亡后其飞行中的弹道被移除', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 600, y: 520 };
+    game.enemy.pos = { x: 900, y: 520 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    applyDamage(game, game.player, { amount: 99999, type: 'energy', source: game.enemy });
+    expect(game.player.alive).toBe(false);
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.hp).toBe(game.enemy.maxHp);
+  });
+
+  it('炮塔弹道遵循同样的路径封锁规则', () => {
+    const game = makeGame();
+    const turret = game.buildings.find((b) => b.kind === 'turret' && b.team === 1 && b.slot === 0)!;
+    game.player.pos = { x: turret.pos.x - 200, y: turret.pos.y };
+    expect(game.basicAttack(turret, game.player)).toBe(true);
+    expect(game.projectiles[0].kind).toBe('turret');
+    stepProjectiles(game, 1);
+    expect(game.player.hp).toBeLessThan(game.player.maxHp);
+
+    const blocked = makeGame();
+    const tower = blocked.buildings.find((b) => b.kind === 'turret' && b.team === 0 && b.slot === 1)!;
+    blocked.enemy.pos = { x: 950, y: 520 };
+    expect(blocked.basicAttack(tower, blocked.enemy)).toBe(true);
+    blocked.blockade = { ...BLOCKADE };
+    stepProjectiles(blocked, 1);
+    expect(blocked.projectiles.length).toBe(0);
+    expect(blocked.enemy.hp).toBe(blocked.enemy.maxHp);
+  });
+
+  it('萤光飞弹命中后沉默只触发一次', () => {
+    const game = makeGame('lumi', 'emberfang');
+    const lumi = game.player;
+    const foe = game.enemy;
+    lumi.skillLevels[0] = 1;
+    foe.pos = { x: lumi.pos.x + 300, y: lumi.pos.y };
+    expect(game.castSkill(lumi, 0, { entityId: foe.id })).toBe(true);
+    stepProjectiles(game, 1);
+    expect(foe.hp).toBeLessThan(foe.maxHp);
+    expect(foe.statuses.filter((s) => s.type === 'silence').length).toBe(1);
+    expect(game.projectiles.length).toBe(0);
+    stepProjectiles(game, 1);
+    expect(foe.statuses.filter((s) => s.type === 'silence').length).toBe(1);
+  });
+
+  it('萤光飞弹被封锁拦截时不造成伤害和沉默', () => {
+    const game = makeGame('lumi', 'emberfang');
+    const lumi = game.player;
+    const foe = game.enemy;
+    lumi.skillLevels[0] = 1;
+    lumi.pos = { x: 600, y: 520 };
+    foe.pos = { x: 930, y: 520 };
+    expect(game.castSkill(lumi, 0, { entityId: foe.id })).toBe(true);
+    game.blockade = { ...BLOCKADE };
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(foe.hp).toBe(foe.maxHp);
+    expect(foe.statuses.some((s) => s.type === 'silence')).toBe(false);
+  });
+
+  it('无障碍的合法远程普攻正常命中并结算', () => {
+    const game = makeGame('veilora', 'emberfang');
+    game.player.pos = { x: 600, y: 520 };
+    game.enemy.pos = { x: 900, y: 520 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    stepProjectiles(game, 1);
+    expect(game.enemy.hp).toBeLessThan(game.enemy.maxHp);
+    expect(game.player.damageDealt ?? 0).toBeGreaterThan(0);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('近战攻击仍然立即结算且不生成弹道', () => {
+    const game = makeGame('emberfang', 'veilora');
+    game.enemy.pos = { x: game.player.pos.x + 70, y: game.player.pos.y };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.hp).toBeLessThan(game.enemy.maxHp);
+  });
+
+  it('目标从战场移除后弹道数组不残留幽灵对象', () => {
+    const game = makeGame('veilora', 'emberfang');
+    const minion = createMinion('ranged', 1, { x: game.player.pos.x + 200, y: game.player.pos.y }, 1, false, 0);
+    game.minions.push(minion);
+    expect(game.basicAttack(game.player, minion)).toBe(true);
+    expect(game.projectiles.length).toBe(1);
+    applyDamage(game, minion, { amount: 99999, type: 'energy' });
+    game.minions = game.minions.filter((m) => m.alive);
+    stepProjectiles(game, 0.5);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('弹道被阻挡时不产生伤害、击杀、吸血或仇恨', () => {
+    const game = makeGame('veilora', 'emberfang');
+    const player = game.player;
+    const enemy = game.enemy;
+    player.pos = { x: 600, y: 520 };
+    enemy.pos = { x: 930, y: 520 };
+    enemy.hp = 30;
+    player.hp = player.maxHp - 100;
+    (game as unknown as { lifestealOf: (h: Hero) => number }).lifestealOf = () => 0.5;
+    expect(game.basicAttack(player, enemy)).toBe(true);
+    game.blockade = { ...BLOCKADE };
+    stepProjectiles(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(enemy.alive).toBe(true);
+    expect(enemy.hp).toBe(30);
+    expect(player.hp).toBe(player.maxHp - 100);
+    expect(player.kills).toBe(0);
+    expect(game.kills.length).toBe(0);
+    expect(game.buildings.every((b) => b.aggroHeroId === undefined)).toBe(true);
+  });
+
+  it('路线封锁事件开启拦截飞行弹道，结束后新弹道正常命中', () => {
+    const game = makeGame('veilora', 'emberfang');
+    const player = game.player;
+    const enemy = game.enemy;
+    (enemy as Partial<Hero>).ai = undefined;
+    player.pos = { x: 660, y: 520 };
+    enemy.pos = { x: 1000, y: 520 };
+    expect(game.basicAttack(player, enemy)).toBe(true);
+    const event = game.events.find((e) => e.id === 'blockade')!;
+    event.startsIn = 0.01;
+    tick(game, 0.6);
+    expect(game.blockade).not.toBeNull();
+    expect(game.projectiles.length).toBe(0);
+    expect(enemy.hp).toBe(enemy.maxHp);
+    event.startsIn = 0.01;
+    tick(game, 0.2);
+    expect(game.blockade).toBeNull();
+    player.attackCd = 0;
+    expect(game.basicAttack(player, enemy)).toBe(true);
+    tick(game, 1);
+    expect(enemy.hp).toBeLessThan(enemy.maxHp);
   });
 });
 
