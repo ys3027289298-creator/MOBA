@@ -1,5 +1,6 @@
 import { getHeroDef, TACTICAL_SKILLS } from '../data/heroes';
-import { getItem, purchasePrice, type ItemDef } from '../data/items';
+import { findItem, getItem, purchasePrice, type ItemDef } from '../data/items';
+import { canUseItem } from './items';
 import {
   BLUE_BASE, BUSHES, MAP_H, MAP_W, NEUTRAL_AREA, RED_BASE,
   WALLS, collideWalls, dist, inRect, lineBlocked, moveAlongLane, nearestLanePoint,
@@ -251,6 +252,9 @@ export class Game {
   private updateHero(hero: Hero, dt: number) {
     const cdr = this.weather.kind === 'aurora' ? 1.7 : 1;
     for (const key of Object.keys(hero.cooldowns)) hero.cooldowns[key] = Math.max(0, hero.cooldowns[key] - dt * cdr);
+    if (hero.itemCooldowns) {
+      for (const key of Object.keys(hero.itemCooldowns)) hero.itemCooldowns[key] = Math.max(0, hero.itemCooldowns[key] - dt);
+    }
     this.tickStatuses(hero, dt);
     if (!hero.alive) {
       hero.deadTimer -= dt;
@@ -867,22 +871,47 @@ export class Game {
   }
 
   useItem(hero: Hero, itemId: string): boolean {
-    if (!hero.items.includes(itemId)) return false;
-    const item = getItem(itemId);
-    if (item.active === 'heal150') {
-      healEntity(this, hero, 150, hero);
-      hero.mana = Math.min(hero.maxMana, hero.mana + 80);
-      this.removeItem(hero, itemId);
-    } else if (item.active === 'heal260') {
-      healEntity(this, hero, 260, hero);
-      hero.mana = Math.min(hero.maxMana, hero.mana + 160);
-    } else if (item.active === 'reviveReady') {
-      healEntity(this, hero, 320, hero);
-      addStatus(hero, { type: 'shield', duration: 4, value: 260 });
-    } else if (item.active === 'ward') {
-      this.wards.push({ id: newId(), team: hero.team, pos: { ...hero.pos }, ttl: 90 });
-      this.notify('侦测守卫已放置', '#8ecae6');
+    if (!canUseItem(hero, itemId, this.result === 'running').ok) return false;
+    const item = findItem(itemId)!;
+    if (!this.applyItemActive(hero, item)) return false;
+    if (item.id === 'potion') this.removeItem(hero, item.id);
+    if (item.cooldown && item.cooldown > 0) {
+      if (!hero.itemCooldowns) hero.itemCooldowns = {};
+      hero.itemCooldowns[item.id] = item.cooldown;
     }
+    if (item.active === 'ward') this.notify('侦测守卫已放置', '#8ecae6');
+    else this.notify(`${hero.name} 使用了 ${item.name}`, '#80ed99');
+    return true;
+  }
+
+  useItemSlot(hero: Hero, slot: number): boolean {
+    const itemId = hero.items[slot];
+    if (!itemId) return false;
+    return this.useItem(hero, itemId);
+  }
+
+  private applyItemActive(hero: Hero, item: ItemDef): boolean {
+    if (item.active === 'heal150') return this.applyRestore(hero, 150, 80);
+    if (item.active === 'heal260') return this.applyRestore(hero, 260, 160);
+    if (item.active === 'reviveReady') {
+      this.applyRestore(hero, 320, 0);
+      addStatus(hero, { type: 'shield', duration: 4, value: 260 });
+      return true;
+    }
+    if (item.active === 'ward') {
+      this.wards = this.wards.filter((ward) => ward.team !== hero.team);
+      this.wards.push({ id: newId(), team: hero.team, pos: { ...hero.pos }, ttl: 90 });
+      return true;
+    }
+    return false;
+  }
+
+  private applyRestore(hero: Hero, hp: number, mana: number): boolean {
+    const hpGain = Math.min(hero.maxHp, hero.hp + hp) - hero.hp;
+    const manaGain = Math.min(hero.maxMana, hero.mana + mana) - hero.mana;
+    if (hpGain <= 0 && manaGain <= 0) return false;
+    if (hpGain > 0) healEntity(this, hero, hpGain, hero);
+    if (manaGain > 0) hero.mana = Math.min(hero.maxMana, hero.mana + manaGain);
     return true;
   }
 

@@ -58,6 +58,7 @@ export function createHero(heroId: string, team: Team, isPlayer: boolean): Hero 
     gold: 500,
     skillLevels: [0, 0, 0, 0],
     cooldowns: { Q: 0, W: 0, E: 0, R: 0, D: 0, F: 0 },
+    itemCooldowns: {},
     items: [],
     recall: 0,
     deadTimer: 0,

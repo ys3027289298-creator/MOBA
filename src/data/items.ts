@@ -10,6 +10,7 @@ export interface ItemDef {
   stats: Partial<Stats> & { lifesteal?: number; cooldownReduce?: number; crit?: number };
   recipe: string[];
   active?: string;
+  cooldown?: number;
   description: string;
 }
 
@@ -27,13 +28,17 @@ export const ITEMS: ItemDef[] = [
   { id: 'boots', name: '跃迁战靴', category: 'movement', cost: 850, stats: { moveSpeed: 62, attackInterval: -0.06 }, recipe: ['sandals'], description: '+62 移速' },
   { id: 'gauntlet', name: '撼地护手', category: 'movement', cost: 1450, stats: { moveSpeed: 45, defense: 28, attack: 22 }, recipe: ['boots'], description: '移速、防御、攻击均衡提升' },
   { id: 'potion', name: '星露补给', category: 'recovery', cost: 180, stats: {}, recipe: [], active: 'heal150', description: '主动：回复 150 生命和 80 法力' },
-  { id: 'chalice', name: '回涌圣杯', category: 'recovery', cost: 900, stats: { maxMana: 180, manaRegen: 12, hpRegen: 8 }, recipe: [], active: 'heal260', description: '主动：回复 260 生命和 160 法力' },
-  { id: 'phoenix', name: '不死鸟羽', category: 'recovery', cost: 1600, stats: { maxHp: 320, hpRegen: 14, abilityPower: 28 }, recipe: ['chalice'], active: 'reviveReady', description: '生命值低时提供护盾，主动回复生命' },
+  { id: 'chalice', name: '回涌圣杯', category: 'recovery', cost: 900, stats: { maxMana: 180, manaRegen: 12, hpRegen: 8 }, recipe: [], active: 'heal260', cooldown: 18, description: '主动：回复 260 生命和 160 法力' },
+  { id: 'phoenix', name: '不死鸟羽', category: 'recovery', cost: 1600, stats: { maxHp: 320, hpRegen: 14, abilityPower: 28 }, recipe: ['chalice'], active: 'reviveReady', cooldown: 30, description: '生命值低时提供护盾，主动回复生命' },
   { id: 'wardstone', name: '侦幕晶石', category: 'active', cost: 600, stats: { maxHp: 100, maxMana: 60 }, recipe: [], active: 'ward', description: '主动：放置侦测守卫，揭示草丛 90 秒' }
 ];
 
+export function findItem(id: string): ItemDef | undefined {
+  return ITEMS.find((i) => i.id === id);
+}
+
 export function getItem(id: string): ItemDef {
-  const item = ITEMS.find((i) => i.id === id);
+  const item = findItem(id);
   if (!item) throw new Error(`未知装备: ${id}`);
   return item;
 }

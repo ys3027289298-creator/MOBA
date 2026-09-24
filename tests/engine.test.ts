@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/engine/game';
+import { getItem } from '../src/data/items';
+import { itemCooldownRemaining } from '../src/engine/items';
 import { BLUE_BASE, RED_BASE, WALLS, collideWalls, dist, lineBlocked } from '../src/engine/map';
 import { createHero, createMinion } from '../src/engine/factory';
 import { addStatus, applyDamage } from '../src/engine/combat';
@@ -260,5 +262,219 @@ describe('电脑英雄', () => {
     game.enemy.pos = { ...RED_BASE };
     tick(game, 20);
     expect(game.enemy.pos.x).toBeLessThan(RED_BASE.x);
+  });
+});
+
+describe('主动道具使用规则', () => {
+  function hurt(game: Game, hpLoss: number, manaLoss = 0) {
+    const hero = game.player;
+    hero.hp = Math.max(1, hero.hp - hpLoss);
+    hero.mana = Math.max(0, hero.mana - manaLoss);
+  }
+
+  it('被动装备不能被当作主动道具使用', () => {
+    const game = makeGame();
+    expect(game.buyItem(game.player, 'blade')).toBe(true);
+    const notifications = game.notifications.length;
+    expect(game.useItem(game.player, 'blade')).toBe(false);
+    expect(game.player.items).toContain('blade');
+    expect(game.notifications.length).toBe(notifications);
+  });
+
+  it('未拥有的装备和未知 ID 安全失败', () => {
+    const game = makeGame();
+    expect(game.useItem(game.player, 'chalice')).toBe(false);
+    expect(() => game.useItem(game.player, 'mystery-box')).not.toThrow();
+    expect(game.useItem(game.player, 'mystery-box')).toBe(false);
+    expect(game.player.items.length).toBe(0);
+  });
+
+  it('死亡英雄无法使用主动道具', () => {
+    const game = makeGame();
+    game.buyItem(game.player, 'potion');
+    hurt(game, 200, 100);
+    applyDamage(game, game.player, { amount: 99999, type: 'energy', source: game.enemy });
+    expect(game.player.alive).toBe(false);
+    const mana = game.player.mana;
+    expect(game.useItem(game.player, 'potion')).toBe(false);
+    expect(game.player.mana).toBe(mana);
+    expect(game.player.items).toContain('potion');
+  });
+
+  it('比赛结束后拒绝使用', () => {
+    const game = makeGame();
+    game.buyItem(game.player, 'potion');
+    hurt(game, 300);
+    game.result = 'victory';
+    expect(game.useItem(game.player, 'potion')).toBe(false);
+    expect(game.player.items).toContain('potion');
+  });
+
+  it('空装备栏位快捷键返回 false', () => {
+    const game = makeGame();
+    expect(game.useItemSlot(game.player, 0)).toBe(false);
+    expect(game.useItemSlot(game.player, 5)).toBe(false);
+  });
+
+  it('满血满蓝时恢复类道具失败且不消耗', () => {
+    const game = makeGame();
+    game.buyItem(game.player, 'potion');
+    const notifications = game.notifications.length;
+    const texts = game.texts.length;
+    expect(game.useItem(game.player, 'potion')).toBe(false);
+    expect(game.player.items).toContain('potion');
+    expect(game.notifications.length).toBe(notifications);
+    expect(game.texts.length).toBe(texts);
+  });
+
+  it('部分恢复成功且星露补给只消耗一次', () => {
+    const game = makeGame();
+    game.buyItem(game.player, 'potion');
+    hurt(game, 100, 50);
+    const hp = game.player.hp;
+    const mana = game.player.mana;
+    expect(game.useItemSlot(game.player, game.player.items.indexOf('potion'))).toBe(true);
+    expect(game.player.hp).toBe(hp + 100);
+    expect(game.player.mana).toBe(mana + 50);
+    expect(game.player.items).not.toContain('potion');
+    expect(game.useItem(game.player, 'potion')).toBe(false);
+  });
+
+  it('一次成功使用只产生一份通知和效果', () => {
+    const game = makeGame();
+    game.buyItem(game.player, 'potion');
+    hurt(game, 400, 0);
+    const notifications = game.notifications.length;
+    expect(game.useItem(game.player, 'potion')).toBe(true);
+    expect(game.notifications.length).toBe(notifications + 1);
+  });
+
+  it('回涌圣杯使用后保留装备并进入冷却', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    hurt(game, 300, 200);
+    const hp = game.player.hp;
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    expect(game.player.hp).toBeGreaterThan(hp);
+    expect(game.player.items).toContain('chalice');
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBeGreaterThan(0);
+    const hpAfter = game.player.hp;
+    const manaAfter = game.player.mana;
+    expect(game.useItem(game.player, 'chalice')).toBe(false);
+    expect(game.player.hp).toBe(hpAfter);
+    expect(game.player.mana).toBe(manaAfter);
+  });
+
+  it('冷却结束后回涌圣杯可以再次使用', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    hurt(game, 300, 200);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    tick(game, 19);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBe(0);
+    hurt(game, 100, 0);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+  });
+
+  it('不死鸟羽提供治疗和护盾且保留装备', () => {
+    const game = makeGame();
+    game.player.gold = 2500;
+    game.buyItem(game.player, 'chalice');
+    game.buyItem(game.player, 'phoenix');
+    hurt(game, 400);
+    const hp = game.player.hp;
+    expect(game.useItem(game.player, 'phoenix')).toBe(true);
+    expect(game.player.hp).toBe(hp + 320);
+    expect(game.player.statuses.some((s) => s.type === 'shield' && s.value === 260)).toBe(true);
+    expect(game.player.items).toContain('phoenix');
+    const shields = game.player.statuses.filter((s) => s.type === 'shield').length;
+    expect(game.useItem(game.player, 'phoenix')).toBe(false);
+    expect(game.player.statuses.filter((s) => s.type === 'shield').length).toBe(shields);
+  });
+
+  it('侦幕晶石同队最多一个守卫，重新放置原子替换', () => {
+    const game = makeGame();
+    game.player.gold = 700;
+    game.buyItem(game.player, 'wardstone');
+    expect(game.useItem(game.player, 'wardstone')).toBe(true);
+    expect(game.wards.length).toBe(1);
+    game.player.pos = { x: game.player.pos.x + 120, y: game.player.pos.y };
+    expect(game.useItem(game.player, 'wardstone')).toBe(true);
+    expect(game.wards.length).toBe(1);
+    expect(game.wards[0].pos.x).toBe(game.player.pos.x);
+    expect(game.player.items).toContain('wardstone');
+  });
+
+  it('暂停时道具冷却被冻结', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    hurt(game, 300, 200);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    const remaining = itemCooldownRemaining(game.player, 'chalice');
+    game.paused = true;
+    tick(game, 5);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBe(remaining);
+    game.paused = false;
+    tick(game, 2);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBeLessThan(remaining);
+  });
+
+  it('回城不会重置正在运行的道具冷却', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    hurt(game, 300, 200);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    tick(game, 2);
+    game.recall(game.player);
+    tick(game, 1);
+    const remaining = itemCooldownRemaining(game.player, 'chalice');
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThan(18);
+  });
+
+  it('复活后装备保留且冷却不为负数', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    hurt(game, 300, 200);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    applyDamage(game, game.player, { amount: 99999, type: 'energy', source: game.enemy });
+    expect(game.useItem(game.player, 'chalice')).toBe(false);
+    tick(game, game.player.deadTimer + 0.1);
+    expect(game.player.alive).toBe(true);
+    expect(game.player.items).toContain('chalice');
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBeGreaterThanOrEqual(0);
+    tick(game, 19);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBe(0);
+    hurt(game, 300, 200);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+  });
+
+  it('旧存档缺少 itemCooldowns 字段按零冷却处理', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    game.buyItem(game.player, 'chalice');
+    delete game.player.itemCooldowns;
+    hurt(game, 300, 200);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBe(0);
+    expect(game.useItem(game.player, 'chalice')).toBe(true);
+    expect(itemCooldownRemaining(game.player, 'chalice')).toBeGreaterThan(0);
+  });
+
+  it('商店购买与装备属性回归', () => {
+    const game = makeGame();
+    game.player.gold = 900;
+    const mana = game.player.maxMana;
+    expect(getItem('chalice').cost).toBe(900);
+    expect(getItem('chalice').stats.maxMana).toBe(180);
+    expect(game.buyItem(game.player, 'chalice')).toBe(true);
+    expect(game.player.gold).toBe(0);
+    expect(game.player.maxMana).toBe(mana + 180);
+    expect(getItem('wardstone').cost).toBe(600);
+    expect(getItem('potion').active).toBe('heal150');
   });
 });

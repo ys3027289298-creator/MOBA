@@ -73,6 +73,7 @@ export interface Hero extends GameEntity {
   gold: number;
   skillLevels: number[];
   cooldowns: Record<string, number>;
+  itemCooldowns?: Record<string, number>;
   items: string[];
   recall: number;
   deadTimer: number;

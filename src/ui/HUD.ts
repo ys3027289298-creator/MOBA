@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import type { ArenaScene } from '../game/ArenaScene';
 import { getHeroDef, TACTICAL_SKILLS } from '../data/heroes';
-import { getItem } from '../data/items';
+import { findItem, getItem } from '../data/items';
+import { itemSlotState } from '../engine/items';
 import { MATCH_DURATION, xpForLevel } from '../engine/progression';
 import type { GameEntity, Hero } from '../engine/types';
 
@@ -146,7 +147,16 @@ export class HUD {
       skillLines.push(`${tactical.key} ${tactical.name} [${cooldown > 0 ? `${cooldown.toFixed(0)}s` : '就绪'}]`);
     }
     this.text.get('skills')!.setText(skillLines.join('   '));
-    this.text.get('items')!.setText(`装备: ${player.items.map((id, index) => `${index + 1}.${getItem(id).name}`).join('  ') || '无'}`);
+    const itemLabels = player.items.map((id, index) => {
+      const item = findItem(id);
+      if (!item) return `${index + 1}.未知装备`;
+      if (!item.active) return `${index + 1}.${item.name}[被动]`;
+      const slot = itemSlotState(player, id, model.result === 'running');
+      const state = slot.state === 'cooldown' ? `冷却${slot.remaining.toFixed(0)}s`
+        : slot.state === 'ready' ? '可用' : '不可用';
+      return `${index + 1}.${item.name}[${state}]`;
+    });
+    this.text.get('items')!.setText(`装备: ${itemLabels.join('  ') || '无'}`);
     const towerText = model.buildings
       .filter((b) => b.kind === 'turret')
       .map((t) => `${t.team === 0 ? '蓝' : '红'}${t.slot === 0 ? '外' : '内'}:${t.alive ? Math.ceil(t.hp) : '毁'}`)
