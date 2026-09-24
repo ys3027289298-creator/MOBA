@@ -262,3 +262,237 @@ describe('电脑英雄', () => {
     expect(game.enemy.pos.x).toBeLessThan(RED_BASE.x);
   });
 });
+
+describe('弹道连续路径判定与路线封锁', () => {
+  const BLOCKADE_RECT = { x: 790, y: 430, w: 100, h: 180 };
+
+  function prepareRangedDuel(player = 'veilora', enemy = 'emberfang') {
+    const game = makeGame(player, enemy);
+    game.waveTimer = 999;
+    game.minions = [];
+    game.enemy.ai = undefined;
+    return game;
+  }
+
+  function activateBlockade(game: Game) {
+    const event = game.events.find((e) => e.id === 'blockade')!;
+    event.active = true;
+    event.startsIn = 999;
+    game.blockade = { ...BLOCKADE_RECT };
+  }
+
+  function deactivateBlockade(game: Game) {
+    const event = game.events.find((e) => e.id === 'blockade')!;
+    event.active = false;
+    game.blockade = null;
+  }
+
+  it('静态墙体拦截飞行中的弹道', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 840, y: 340 };
+    game.enemy.pos = { x: 840, y: 380 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    expect(game.projectiles.length).toBe(1);
+    game.enemy.pos = { x: 840, y: 200 };
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('路线封锁激活时远程普攻无法起射', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    activateBlockade(game);
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    expect(game.projectiles.length).toBe(0);
+    tick(game, 1);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('路线封锁对已在空中的弹道实时生效', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    expect(game.projectiles.length).toBe(1);
+    activateBlockade(game);
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('路线封锁结束后新弹道可以正常通过', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    activateBlockade(game);
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    deactivateBlockade(game);
+    const hp = game.enemy.hp;
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    tick(game, 1);
+    expect(game.enemy.hp).toBeLessThan(hp);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('目标移动后最后一段被墙体挡住则不结算', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 500, y: 400 };
+    game.enemy.pos = { x: 700, y: 400 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    game.projectiles[0].pos = { x: 325, y: 173 };
+    game.enemy.pos = { x: 296, y: 193 };
+    game.update(0.05);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('目标死亡后弹道被移除且不结算，复活后也无幽灵弹道', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    applyDamage(game, game.enemy, { amount: 99999, type: 'energy', source: game.player });
+    const kills = game.kills.length;
+    const dealt = game.player.damageDealt;
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.kills.length).toBe(kills);
+    expect(game.player.damageDealt).toBe(dealt);
+    tick(game, game.enemy.deadTimer + 1);
+    expect(game.enemy.alive).toBe(true);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('源单位死亡后其飞行中的弹道被移除', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    applyDamage(game, game.player, { amount: 99999, type: 'energy', source: game.enemy });
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('炮塔弹道在无障碍时正常命中', () => {
+    const game = prepareRangedDuel();
+    const turret = game.buildings.find((b) => b.kind === 'turret' && b.team === 0 && b.slot === 1)!;
+    game.enemy.pos = { x: turret.pos.x + 280, y: turret.pos.y + 5 };
+    expect(game.basicAttack(turret, game.enemy)).toBe(true);
+    expect(game.projectiles[0].kind).toBe('turret');
+    tick(game, 0.5);
+    expect(game.enemy.damageTaken).toBeGreaterThan(0);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('炮塔弹道被路线封锁拦截', () => {
+    const game = prepareRangedDuel();
+    const turret = game.buildings.find((b) => b.kind === 'turret' && b.team === 0 && b.slot === 1)!;
+    game.enemy.pos = { x: 960, y: 520 };
+    expect(game.basicAttack(turret, game.enemy)).toBe(true);
+    activateBlockade(game);
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+  });
+
+  it('萤光飞弹的沉默只触发一次', () => {
+    const game = prepareRangedDuel('lumi', 'emberfang');
+    game.player.skillLevels[0] = 1;
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 990, y: 470 };
+    expect(game.castSkill(game.player, 0, { entityId: game.enemy.id })).toBe(true);
+    expect(game.projectiles.length).toBe(1);
+    tick(game, 1);
+    expect(game.projectiles.length).toBe(0);
+    const expected = Math.round(55 + 28 + game.player.stats.abilityPower * 0.75);
+    expect(game.enemy.damageTaken).toBe(expected);
+    const silences = game.enemy.statuses.filter((s) => s.type === 'silence');
+    expect(silences.length).toBe(1);
+    const remaining = silences[0].duration;
+    tick(game, 0.5);
+    const later = game.enemy.statuses.filter((s) => s.type === 'silence');
+    expect(later.length).toBe(1);
+    expect(later[0].duration).toBeLessThan(remaining);
+  });
+
+  it('合法无障碍的远程普攻正常命中', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    const hp = game.enemy.hp;
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    tick(game, 1);
+    expect(game.enemy.hp).toBeLessThan(hp);
+    expect(game.projectiles.length).toBe(0);
+  });
+
+  it('近战攻击保持即时结算且不生成弹道', () => {
+    const game = makeGame('emberfang', 'veilora');
+    game.waveTimer = 999;
+    game.enemy.ai = undefined;
+    game.enemy.pos = { x: game.player.pos.x + 70, y: game.player.pos.y };
+    const hp = game.enemy.hp;
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.hp).toBeLessThan(hp);
+  });
+
+  it('多发弹道全部结算后弹道数组无残留', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    for (let i = 0; i < 3; i++) {
+      game.player.attackCd = 0;
+      expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    }
+    expect(game.projectiles.length).toBe(3);
+    tick(game, 2);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBeGreaterThan(0);
+  });
+
+  it('被封锁的弹道不产生伤害、击杀、吸血或仇恨', () => {
+    const game = prepareRangedDuel();
+    game.lifestealOf = () => 0.5;
+    game.player.stats.hpRegen = 0;
+    game.player.hp = 100;
+    game.player.pos = { x: 700, y: 480 };
+    game.enemy.pos = { x: 1010, y: 560 };
+    activateBlockade(game);
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    deactivateBlockade(game);
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    activateBlockade(game);
+    const kills = game.kills.length;
+    tick(game, 1.5);
+    expect(game.projectiles.length).toBe(0);
+    expect(game.enemy.damageTaken).toBe(0);
+    expect(game.kills.length).toBe(kills);
+    expect(game.player.hp).toBe(100);
+    expect(game.player.damageDealt ?? 0).toBe(0);
+    expect(game.buildings.filter((b) => b.team === 1).every((b) => b.aggroHeroId === undefined)).toBe(true);
+  });
+
+  it('路线封锁事件开启和结束实时影响弹道（集成）', () => {
+    const game = prepareRangedDuel();
+    game.player.pos = { x: 700, y: 470 };
+    game.enemy.pos = { x: 980, y: 470 };
+    const event = game.events.find((e) => e.id === 'blockade')!;
+    event.startsIn = 0.05;
+    tick(game, 0.2);
+    expect(event.active).toBe(true);
+    expect(game.blockade).not.toBeNull();
+    expect(game.basicAttack(game.player, game.enemy)).toBe(false);
+    event.startsIn = 0.05;
+    tick(game, 0.2);
+    expect(event.active).toBe(false);
+    expect(game.blockade).toBeNull();
+    const hp = game.enemy.hp;
+    expect(game.basicAttack(game.player, game.enemy)).toBe(true);
+    tick(game, 1);
+    expect(game.enemy.hp).toBeLessThan(hp);
+  });
+});

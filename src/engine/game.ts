@@ -392,6 +392,9 @@ export class Game {
     const alive: Projectile[] = [];
     for (const projectile of this.projectiles) {
       const target = projectile.targetId !== undefined ? this.entityById(projectile.targetId) : undefined;
+      if (projectile.targetId !== undefined && !target?.alive) continue;
+      const source = this.entityById(projectile.sourceId);
+      if (!source?.alive) continue;
       const destination = target?.alive ? target.pos : projectile.target;
       if (!destination) continue;
       const dx = destination.x - projectile.pos.x;
@@ -399,26 +402,32 @@ export class Game {
       const d = Math.hypot(dx, dy);
       const step = projectile.speed * dt;
       if (d <= step + 8) {
-        if (target?.alive) {
-          const source = this.entityById(projectile.sourceId);
-          if (source && (projectile.kind === 'attack' || projectile.kind === 'turret')) {
+        if (target && this.canResolveProjectileHit(projectile, target, source)) {
+          if (projectile.kind === 'attack' || projectile.kind === 'turret') {
             this.dealAttackDamage(source, target, projectile.info);
-          } else if (source) {
-            applyDamage(this, target, { ...projectile.info, source });
           } else {
-            applyDamage(this, target, projectile.info);
+            applyDamage(this, target, { ...projectile.info, source });
           }
           if (projectile.onHit) this.resolveProjectileEffect(projectile, target);
         }
       } else {
-      const previous = { ...projectile.pos };
-      projectile.pos.x += (dx / d) * step;
-      projectile.pos.y += (dy / d) * step;
-      if (lineBlocked(previous, projectile.pos, WALLS)) continue;
-      alive.push(projectile);
+        const previous = { ...projectile.pos };
+        projectile.pos.x += (dx / d) * step;
+        projectile.pos.y += (dy / d) * step;
+        if (this.segmentBlocked(previous, projectile.pos)) continue;
+        alive.push(projectile);
       }
     }
     this.projectiles = alive;
+  }
+
+  segmentBlocked(a: Vec2, b: Vec2): boolean {
+    return lineBlocked(a, b, this.activeBlockers());
+  }
+
+  canResolveProjectileHit(projectile: Projectile, target: GameEntity, source?: GameEntity): boolean {
+    if (!target.alive || !source?.alive) return false;
+    return !this.segmentBlocked(projectile.pos, target.pos);
   }
 
   private resolveProjectileEffect(projectile: Projectile, target: GameEntity) {
