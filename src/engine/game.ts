@@ -9,6 +9,7 @@ import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpFo
 import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
 import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
 import { skillDefAt } from './skills';
+import { precheckCast } from './targeting';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
   Projectile, Status, Team, Vec2
@@ -624,26 +625,12 @@ export class Game {
   }
 
   castSkill(hero: Hero, slot: number, input: CastInput): boolean {
-    const check = this.canCast(hero, slot);
-    if (!check.ok) {
-      this.floatText(check.reason ?? '无法释放', hero.pos, '#ff7b7b');
+    const precheck = precheckCast(this, hero, slot, input);
+    if (!precheck.ok) {
+      this.floatText(precheck.reason, hero.pos, '#ff7b7b');
       return false;
     }
-    const def = slot >= 4 ? TACTICAL_SKILLS.find((s) => s.slot === slot)! : getHeroDef(hero.heroId).skills[slot];
-    const level = slot < 4 ? hero.skillLevels[slot] : 1;
-    const point = input.point ?? (input.entityId !== undefined ? this.entityById(input.entityId)?.pos : undefined);
-    if (def.targetMode !== 'none') {
-      if (!point) return false;
-      if (dist(hero.pos, point) > def.range + 24) {
-        this.floatText('距离过远', hero.pos, '#ff7b7b');
-        return false;
-      }
-      if (def.targetMode === 'entity' && (input.entityId === undefined || !this.entityById(input.entityId)?.alive)) return false;
-      if ((def.targetMode === 'point' || def.targetMode === 'entity') && lineBlocked(hero.pos, point, this.activeBlockers()) && slot !== 2) {
-        this.floatText('被墙体阻挡', hero.pos, '#ff7b7b');
-        return false;
-      }
-    }
+    const { def, level, point } = precheck.plan;
     hero.mana -= def.cost(level);
     const cdr = 1 - Math.min(0.4, hero.items.reduce((sum, id) => sum + (getItem(id).stats.cooldownReduce ?? 0), 0));
     hero.cooldowns[def.key] = def.cooldown(level) * cdr;
@@ -669,10 +656,12 @@ export class Game {
     const id = hero.heroId;
     const enemyHeroes = this.heroes.filter((h) => h.team !== hero.team);
     const target = input.entityId !== undefined ? this.entityById(input.entityId) : undefined;
+    const enemyTarget = target && target.alive && target.team !== hero.team ? target : undefined;
+    const allyHeroTarget = target && target.alive && target.team === hero.team && target.kind === 'hero' ? target : undefined;
     if (id === 'emberfang') {
-      if (slot === 0 && target) {
-        hero.pos = collideWalls({ x: target.pos.x - 28, y: target.pos.y }, hero.radius);
-        this.skillDamage(hero, target, 70 + level * 32 + this.apScale(hero, 0.7), 'physical');
+      if (slot === 0 && enemyTarget) {
+        hero.pos = collideWalls({ x: enemyTarget.pos.x - 28, y: enemyTarget.pos.y }, hero.radius);
+        this.skillDamage(hero, enemyTarget, 70 + level * 32 + this.apScale(hero, 0.7), 'physical');
       } else if (slot === 1) {
         addStatus(hero, { type: 'shield', duration: 3.5, value: 80 + level * 38 + this.apScale(hero, 0.5) });
         addStatus(hero, { type: 'haste', duration: 3, value: 0.35 });
@@ -715,10 +704,10 @@ export class Game {
         }
       } else if (slot === 1) {
         addStatus(hero, { type: 'shield', duration: 4, value: 120 + level * 55 + hero.maxHp * 0.08 });
-      } else if (slot === 2 && target) {
-        this.skillDamage(hero, target, 50 + level * 30 + this.apScale(hero, 0.5), 'physical');
-        addStatus(target, { type: 'silence', duration: 1.2 + level * 0.2, value: 1 });
-        this.knockback(target, hero.pos, 150);
+      } else if (slot === 2 && enemyTarget) {
+        this.skillDamage(hero, enemyTarget, 50 + level * 30 + this.apScale(hero, 0.5), 'physical');
+        addStatus(enemyTarget, { type: 'silence', duration: 1.2 + level * 0.2, value: 1 });
+        this.knockback(enemyTarget, hero.pos, 150);
       } else if (slot === 3) {
         for (let t = 0; t < 5; t++) {
           for (const ally of this.alliesInRadius(point, hero.team, 230)) healEntity(this, ally, 24 + level * 12 + this.apScale(hero, 0.25), hero);
@@ -729,16 +718,17 @@ export class Game {
         }
       }
     } else if (id === 'lumi') {
-      if (slot === 0 && target) {
+      if (slot === 0 && enemyTarget) {
         this.projectiles.push({
-          id: newId(), team: hero.team, pos: { ...hero.pos }, targetId: target.id, speed: 680,
+          id: newId(), team: hero.team, pos: { ...hero.pos }, targetId: enemyTarget.id, speed: 680,
           info: { amount: 55 + level * 28 + this.apScale(hero, 0.75), type: 'energy', source: hero, sourceSkill: '萤光飞弹' },
           kind: 'skill', onHit: 'silence', sourceId: hero.id
         });
       } else if (slot === 1) {
-        const ally = target && target.team === hero.team ? target : hero;
-        healEntity(this, ally, 80 + level * 42 + this.apScale(hero, 0.7), hero);
-        addStatus(ally, { type: 'haste', duration: 2, value: 0.2 + level * 0.04 });
+        if (allyHeroTarget) {
+          healEntity(this, allyHeroTarget, 80 + level * 42 + this.apScale(hero, 0.7), hero);
+          addStatus(allyHeroTarget, { type: 'haste', duration: 2, value: 0.2 + level * 0.04 });
+        }
       } else if (slot === 2) {
         for (const enemy of this.enemiesInRadius(hero.pos, hero.team, 110)) this.skillDamage(hero, enemy, 40 + level * 18, 'energy');
         this.blink(hero, point, 360);
@@ -769,11 +759,25 @@ export class Game {
   }
 
   delayedDamage(source: Hero, target: GameEntity, amount: number, type: DamageInfo['type'], delay: number) {
-    this.pendingEffects.push({ t: delay, action: () => this.skillDamage(source, target, amount, type) });
+    this.pendingEffects.push({
+      t: delay,
+      action: () => {
+        const current = this.entityById(target.id);
+        if (!current || !current.alive || current.team === source.team) return;
+        this.skillDamage(source, current, amount, type);
+      }
+    });
   }
 
   delayedHeal(target: Hero, amount: number, delay: number) {
-    this.pendingEffects.push({ t: delay, action: () => healEntity(this, target, amount, target) });
+    this.pendingEffects.push({
+      t: delay,
+      action: () => {
+        const current = this.entityById(target.id);
+        if (!current || !current.alive) return;
+        healEntity(this, current, amount, current);
+      }
+    });
   }
 
   knockback(entity: GameEntity, from: Vec2, distance: number) {
