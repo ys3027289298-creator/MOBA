@@ -5,7 +5,9 @@ import { ITEMS } from './data/items';
 import { MAP_H, MAP_W } from './engine/map';
 import { ArenaScene, type SceneCallbacks } from './game/ArenaScene';
 import { Game, type GameConfig } from './engine/game';
+import { DEFAULT_TRAINING_CONFIG, normalizeTrainingConfig, TRAINING_LIMITS, type TrainingConfig } from './engine/training';
 import { ShopPanel } from './ui/shop';
+import { TrainingPanel } from './ui/trainingPanel';
 import { loadRecords, loadSettings, saveSettings, type MatchRecord } from './storage';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -73,18 +75,41 @@ function renderHeroSelect(mode: GameConfig['mode']) {
     grid.append(card);
   }
   cards.get(selected)?.classList.add('selected');
+  let readTraining: (() => TrainingConfig) | undefined;
+  let trainingPanelEl: HTMLElement | undefined;
+  if (mode === 'practice') {
+    const defaults = DEFAULT_TRAINING_CONFIG;
+    const panel = el('div', 'training-config');
+    panel.innerHTML = `
+      <div class="training-config-title">训练配置</div>
+      <label>初始等级 <select id="train-level">${Array.from({ length: TRAINING_LIMITS.maxLevel }, (_, i) =>
+        `<option value="${i + 1}"${i + 1 === defaults.startLevel ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>
+      <label>初始金币 <input id="train-gold" type="number" min="${TRAINING_LIMITS.minGold}" max="${TRAINING_LIMITS.maxGold}" step="100" value="${defaults.startGold}"></label>
+      <label><input id="train-fullmana" type="checkbox" checked> 满法力</label>
+      <label><input id="train-ai" type="checkbox" checked> 电脑对手</label>
+      <label><input id="train-waves" type="checkbox" checked> 自动生成兵线</label>`;
+    trainingPanelEl = panel;
+    readTraining = () => normalizeTrainingConfig({
+      startLevel: Number((panel.querySelector('#train-level') as HTMLSelectElement).value),
+      startGold: Number((panel.querySelector('#train-gold') as HTMLInputElement).value),
+      fullMana: (panel.querySelector('#train-fullmana') as HTMLInputElement).checked,
+      enableAI: (panel.querySelector('#train-ai') as HTMLInputElement).checked,
+      autoWaves: (panel.querySelector('#train-waves') as HTMLInputElement).checked
+    });
+  }
   const actions = el('div', 'menu-actions');
   actions.append(
-    Object.assign(el('button', 'primary', '进入对战'), { onclick: () => startGame(mode, selected) }),
+    Object.assign(el('button', 'primary', '进入对战'), { onclick: () => startGame(mode, selected, readTraining?.()) }),
     Object.assign(el('button', '', '返回主菜单'), { onclick: renderMenu })
   );
-  screen.append(grid, actions);
+  screen.append(grid, ...(trainingPanelEl ? [trainingPanelEl] : []), actions);
   app.append(screen);
 }
 
-function startGame(mode: GameConfig['mode'], heroId: string) {
+function startGame(mode: GameConfig['mode'], heroId: string, training?: Partial<TrainingConfig> | null) {
   app.innerHTML = '';
-  model = new Game({ mode, playerHero: heroId });
+  model = new Game({ mode, playerHero: heroId, training: mode === 'practice' ? training : undefined });
+  const gameConfig = model.config;
   const screen = el('div', 'screen', '') as HTMLDivElement;
   screen.classList.remove('screen');
   screen.id = 'game-screen';
@@ -97,6 +122,8 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   topButtons.append(pauseButton, restartButton, exitButton);
   shop = new ShopPanel(model, undefined);
   screen.append(container, shop.element, topButtons);
+  const trainingPanel = mode === 'practice' ? new TrainingPanel(model) : null;
+  if (trainingPanel) screen.append(trainingPanel.element);
   app.append(screen);
   const callbacks: SceneCallbacks = { onEnd: showResult, onExit: renderMenu };
   phaser = new Phaser.Game({
@@ -111,9 +138,12 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   (window as unknown as { __starRingGame?: Game }).__starRingGame = model;
   phaser.scene.start('arena', { model, callbacks });
   const refreshShop = () => shop?.render();
-  shopTimer = window.setInterval(() => { if (model?.result === 'running') shop?.render(); }, 1000);
+  shopTimer = window.setInterval(() => {
+    if (model?.result === 'running') shop?.render();
+    trainingPanel?.update();
+  }, 1000);
   pauseButton.onclick = () => togglePause(true);
-  restartButton.onclick = () => { destroyPhaser(); startGame(mode, heroId); };
+  restartButton.onclick = () => { destroyPhaser(); startGame(mode, heroId, gameConfig.training); };
   exitButton.onclick = () => { destroyPhaser(); renderMenu(); };
   keyHandler = onKey;
   window.addEventListener('keydown', onKey);
@@ -132,13 +162,14 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
       const restart = el('button', '', '重新开始');
       const exit = el('button', '', '返回主菜单');
       resume.onclick = () => togglePause(false);
-      restart.onclick = () => { destroyPhaser(); startGame(mode, heroId); };
+      restart.onclick = () => { destroyPhaser(); startGame(mode, heroId, gameConfig.training); };
       exit.onclick = () => { destroyPhaser(); renderMenu(); };
       overlay.append(resume, restart, exit);
       screen.append(overlay);
     } else if (!paused && overlay) {
       overlay.remove();
     }
+    trainingPanel?.update();
   }
   void refreshShop;
 }
@@ -177,7 +208,7 @@ function showResult(record: MatchRecord) {
     <p><b>基地状态：</b>蓝方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 0)!.hp)} / 红方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 1)!.hp)}</p>`;
   const actions = el('div', 'menu-actions');
   actions.append(
-    Object.assign(el('button', 'primary', '再来一局'), { onclick: () => startGame(finalModel.config.mode, record.playerHero) }),
+    Object.assign(el('button', 'primary', '再来一局'), { onclick: () => startGame(finalModel.config.mode, record.playerHero, finalModel.config.training) }),
     Object.assign(el('button', '', '返回主菜单'), { onclick: renderMenu })
   );
   card.append(actions);

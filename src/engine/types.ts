@@ -94,6 +94,7 @@ export interface Minion extends GameEntity {
   bountyXp: number;
   wave: number;
   promoted?: boolean;
+  training?: boolean;
 }
 
 export interface Building extends GameEntity {

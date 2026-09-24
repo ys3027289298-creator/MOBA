@@ -158,3 +158,15 @@ export function createBuildings(): Building[] {
   }
   return buildings;
 }
+
+export function createTrainingTarget(team: Team, pos: Vec2, index: number): CombatMinion {
+  const target = createMinion('melee', team, pos, 0, false, index);
+  target.name = '训练木桩';
+  target.training = true;
+  target.maxHp = 1500;
+  target.hp = 1500;
+  target.bountyGold = 0;
+  target.bountyXp = 0;
+  target.attackPower = 0;
+  return target;
+}

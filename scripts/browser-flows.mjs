@@ -24,7 +24,7 @@ async function openGame(hero = 'emberfang', mode = 'full') {
 
 async function basicFlow() {
   const { browser, page, errors } = await openGame('emberfang', 'practice');
-  const data = await page.evaluate(async () => {
+  const data = await page.evaluate(() => {
     const game = window.__starRingGame;
     const hero = game.player;
     const start = { ...hero.pos };
@@ -58,7 +58,7 @@ async function basicFlow() {
 
 async function killFlow() {
   const { browser, page } = await openGame('veilora', 'practice');
-  const data = await page.evaluate(() => {
+  const data = await page.evaluate(async () => {
     const game = window.__starRingGame;
     const player = game.player;
     const enemy = game.enemy;
@@ -115,7 +115,57 @@ async function defeatFlow() {
   return { name: '玩家基地核心被摧毁并显示失败', data, shown };
 }
 
+async function trainingFlow() {
+  const browser = await puppeteer.launch({ executablePath: edge, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle0' });
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('完整对战')).click());
+  await page.waitForSelector('.hero-card');
+  const fullHasConfig = await page.evaluate(() => !!document.querySelector('.training-config'));
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('返回主菜单')).click());
+  await page.waitForSelector('.menu-actions');
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('练习模式')).click());
+  await page.waitForSelector('.training-config');
+  await page.select('#train-level', '8');
+  await page.evaluate(() => { document.getElementById('train-gold').value = '6000'; });
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('进入对战')).click());
+  await page.waitForSelector('#phaser-container canvas');
+  await page.waitForSelector('.training-panel');
+  await wait(800);
+  const data = await page.evaluate(async () => {
+    const game = window.__starRingGame;
+    const click = (label) => [...document.querySelectorAll('.training-panel button')].find((b) => b.textContent.includes(label)).click();
+    const out = { level: game.player.level, gold: game.player.gold, startLevel: game.training?.startLevel };
+    click('测试目标');
+    out.targets = game.trainingTargets().length;
+    const target = game.trainingTargets()[0];
+    target.hp = 100;
+    click('测试目标');
+    out.refreshed = target.hp === target.maxHp && game.trainingTargets().length === 2;
+    game.spawnWaveNow();
+    click('重置场景');
+    out.minionsAfterReset = game.minions.length;
+    out.hpFull = game.player.hp === game.player.maxHp;
+    out.levelKept = game.player.level === 8;
+    game.paused = true;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    out.disabledWhenPaused = [...document.querySelectorAll('.training-panel button')].every((b) => b.disabled);
+    game.paused = false;
+    return out;
+  });
+  await page.screenshot({ path: 'screenshot-training.png' });
+  await browser.close();
+  const ok = !fullHasConfig && data.level === 8 && data.gold === 6000 && data.startLevel === 8
+    && data.targets === 1 && data.refreshed && data.minionsAfterReset === 0
+    && data.hpFull && data.levelKept && data.disabledWhenPaused;
+  if (!ok) throw new Error(`训练沙盒流程失败 ${JSON.stringify({ fullHasConfig, data })}`);
+  return { name: '训练沙盒：配置/目标刷新/重置/暂停禁用', data, fullHasConfig, errors };
+}
+
 const results = [];
+results.push(await trainingFlow());
 results.push(await basicFlow());
 results.push(await killFlow());
 results.push(await victoryFlow());

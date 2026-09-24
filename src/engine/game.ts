@@ -7,8 +7,12 @@ import {
 } from './map';
 import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpForLevel } from './progression';
 import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
-import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
+import { createBuildings, createHero, createMinion, createTrainingTarget, makeStats, newId, type CombatMinion } from './factory';
 import { skillDefAt } from './skills';
+import {
+  DEFAULT_TRAINING_CONFIG, TRAINING_LIMITS, applyTrainingHeroState, normalizeTrainingConfig,
+  restoreHeroVitals, type TrainingConfig
+} from './training';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
   Projectile, Status, Team, Vec2
@@ -18,6 +22,7 @@ export interface GameConfig {
   mode: 'practice' | 'full';
   playerHero: string;
   enemyHero?: string;
+  training?: Partial<TrainingConfig> | null;
 }
 
 export interface ArenaEventState {
@@ -31,6 +36,7 @@ export interface ArenaEventState {
 
 export class Game {
   config: GameConfig;
+  training?: TrainingConfig;
   time = 0;
   heroes: Hero[] = [];
   minions: Minion[] = [];
@@ -56,10 +62,18 @@ export class Game {
 
   constructor(config: GameConfig) {
     this.config = config;
-    if (config.mode === 'practice') this.waveTimer = 2;
+    if (config.mode === 'practice') {
+      this.training = normalizeTrainingConfig(config.training);
+      this.waveTimer = 2;
+    }
     this.heroes.push(createHero(config.playerHero, 0, true));
     const enemyId = config.enemyHero ?? ['emberfang', 'veilora', 'thorvall', 'lumi'].find((id) => id !== config.playerHero)!;
-    this.heroes.push(createHero(enemyId, 1, false));
+    const enemy = createHero(enemyId, 1, false);
+    if (this.training) {
+      applyTrainingHeroState(this.player, this.training);
+      if (!this.training.enableAI) enemy.ai = undefined;
+    }
+    this.heroes.push(enemy);
     this.buildings = createBuildings();
     this.scheduleEvents();
   }
@@ -135,6 +149,7 @@ export class Game {
   }
 
   private spawnWaves(dt: number) {
+    if (this.training && !this.training.autoWaves) return;
     this.waveTimer -= dt;
     if (this.waveTimer > 0) return;
     this.waveNumber++;
@@ -453,6 +468,11 @@ export class Game {
     const alive: Minion[] = [];
     for (const minion of this.minions) {
       if (!minion.alive) continue;
+      if (minion.training) {
+        this.tickStatuses(minion, dt);
+        alive.push(minion);
+        continue;
+      }
       this.tickStatuses(minion, dt);
       minion.attackCd = Math.max(0, minion.attackCd - dt);
       const combat = minion as CombatMinion;
@@ -1017,6 +1037,82 @@ export class Game {
       if (hero.gold >= purchasePrice(item, hero.items) + 80) this.buyItem(hero, itemId);
       break;
     }
+  }
+
+  canTrainModify(): boolean {
+    return this.config.mode === 'practice' && this.result === 'running' && !this.paused;
+  }
+
+  resetTrainingScene(): boolean {
+    if (!this.canTrainModify() || !this.training) return false;
+    this.minions = [];
+    this.projectiles = [];
+    this.wards = [];
+    this.notifications = [];
+    this.texts = [];
+    this.pendingEffects = [];
+    this.blockade = null;
+    this.weather = { kind: 'none', ttl: 0 };
+    this.energyNode = { pos: { x: 840, y: 520 }, ttl: 0, active: false, hold: [0, 0] };
+    this.baseAlarm = [0, 0];
+    this.kills = [];
+    this.score = [0, 0];
+    this.time = 0;
+    this.waveNumber = 0;
+    this.waveTimer = 2;
+    this.scheduleEvents();
+    applyTrainingHeroState(this.player, this.training);
+    applyTrainingHeroState(this.enemy, DEFAULT_TRAINING_CONFIG);
+    this.notify('训练场景已重置', '#80ed99');
+    return true;
+  }
+
+  restorePlayerState(): boolean {
+    if (!this.canTrainModify()) return false;
+    restoreHeroVitals(this.player);
+    this.notify('玩家状态已恢复', '#80ed99');
+    return true;
+  }
+
+  clearUnits(): boolean {
+    if (!this.canTrainModify()) return false;
+    this.minions = [];
+    this.notify('已清除所有单位', '#8ecae6');
+    return true;
+  }
+
+  spawnWaveNow(): boolean {
+    if (!this.canTrainModify()) return false;
+    this.waveNumber++;
+    for (const team of [0, 1] as Team[]) this.spawnWave(team, false);
+    this.notify(`手动生成第 ${this.waveNumber} 波兵线`, '#8ecae6');
+    return true;
+  }
+
+  trainingTargets(): CombatMinion[] {
+    return this.minions.filter((m) => m.training && m.alive) as CombatMinion[];
+  }
+
+  spawnOrRefreshTrainingTargets(): boolean {
+    if (!this.canTrainModify()) return false;
+    const existing = this.trainingTargets();
+    for (const target of existing) {
+      target.hp = target.maxHp;
+      target.statuses = [];
+      target.damageTaken = 0;
+    }
+    if (existing.length < TRAINING_LIMITS.maxTargets) {
+      const index = existing.length;
+      const pos = collideWalls({
+        x: this.player.pos.x + 150,
+        y: this.player.pos.y + (index - 1) * 80
+      }, 15);
+      this.minions.push(createTrainingTarget(1, pos, index));
+      this.notify(`已生成测试目标（${index + 1}/${TRAINING_LIMITS.maxTargets}）`, '#8ecae6');
+    } else {
+      this.notify('测试目标已刷新', '#8ecae6');
+    }
+    return true;
   }
 
   private checkEnd() {
