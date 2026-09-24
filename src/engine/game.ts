@@ -6,8 +6,9 @@ import {
   type Rect
 } from './map';
 import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpForLevel } from './progression';
-import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
+import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy, shieldAmount } from './combat';
 import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
+import { ACTIVE_ITEM_COOLDOWNS, canUseItem, itemCooldownKey } from './itemUse';
 import { skillDefAt } from './skills';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
@@ -37,7 +38,7 @@ export class Game {
   buildings: Building[] = [];
   projectiles: Projectile[] = [];
   texts: FloatingText[] = [];
-  wards: { id: number; team: Team; pos: Vec2; ttl: number }[] = [];
+  wards: { id: number; team: Team; pos: Vec2; ttl: number; source?: string }[] = [];
   kills: KillRecord[] = [];
   score: [number, number] = [0, 0];
   result: 'running' | 'victory' | 'defeat' | 'timeout' = 'running';
@@ -867,23 +868,43 @@ export class Game {
   }
 
   useItem(hero: Hero, itemId: string): boolean {
-    if (!hero.items.includes(itemId)) return false;
-    const item = getItem(itemId);
-    if (item.active === 'heal150') {
-      healEntity(this, hero, 150, hero);
-      hero.mana = Math.min(hero.maxMana, hero.mana + 80);
-      this.removeItem(hero, itemId);
-    } else if (item.active === 'heal260') {
-      healEntity(this, hero, 260, hero);
-      hero.mana = Math.min(hero.maxMana, hero.mana + 160);
+    const check = canUseItem(hero, itemId, this.result !== 'running');
+    if (!check.ok) return false;
+    const item = check.item!;
+    if (item.active === 'heal150' || item.active === 'heal260') {
+      const hpAmount = item.active === 'heal150' ? 150 : 260;
+      const manaAmount = item.active === 'heal150' ? 80 : 160;
+      if (hero.hp >= hero.maxHp && hero.mana >= hero.maxMana) return false;
+      healEntity(this, hero, hpAmount, hero);
+      hero.mana = Math.min(hero.maxMana, hero.mana + manaAmount);
+      if (item.active === 'heal150') this.removeItem(hero, itemId);
+      else this.startItemCooldown(hero, item.id);
     } else if (item.active === 'reviveReady') {
+      if (hero.hp >= hero.maxHp && shieldAmount(hero) >= 260) return false;
       healEntity(this, hero, 320, hero);
       addStatus(hero, { type: 'shield', duration: 4, value: 260 });
+      this.startItemCooldown(hero, item.id);
     } else if (item.active === 'ward') {
-      this.wards.push({ id: newId(), team: hero.team, pos: { ...hero.pos }, ttl: 90 });
+      this.wards = this.wards.filter((ward) => !(ward.team === hero.team && ward.source === item.id));
+      this.wards.push({ id: newId(), team: hero.team, pos: { ...hero.pos }, ttl: 90, source: item.id });
       this.notify('侦测守卫已放置', '#8ecae6');
+      return true;
+    } else {
+      return false;
     }
+    this.notify(`${hero.name} 使用了 ${item.name}`, '#80ed99');
     return true;
+  }
+
+  useItemSlot(hero: Hero, slot: number): boolean {
+    const itemId = hero.items[slot];
+    if (!itemId) return false;
+    return this.useItem(hero, itemId);
+  }
+
+  private startItemCooldown(hero: Hero, itemId: string) {
+    const cooldown = ACTIVE_ITEM_COOLDOWNS[itemId] ?? 0;
+    if (cooldown > 0) hero.cooldowns[itemCooldownKey(itemId)] = cooldown;
   }
 
   private removeItem(hero: Hero, itemId: string) {

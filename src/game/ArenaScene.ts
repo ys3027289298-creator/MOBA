@@ -108,8 +108,7 @@ export class ArenaScene extends Phaser.Scene {
     this.input.keyboard?.on('keyup-TAB', () => this.hud.setScoreboard(false));
     for (let i = 1; i <= 6; i++) {
       this.input.keyboard?.on(`keydown-${i}`, () => {
-        const item = this.gameModel.player.items[i - 1];
-        if (item) this.gameModel.useItem(this.gameModel.player, item);
+        this.gameModel.useItemSlot(this.gameModel.player, i - 1);
       });
     }
     this.input.on('wheel', (_p: Phaser.Input.Pointer, _o: unknown[], _dx: number, dy: number) => {

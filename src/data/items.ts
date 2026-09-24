@@ -33,9 +33,13 @@ export const ITEMS: ItemDef[] = [
 ];
 
 export function getItem(id: string): ItemDef {
-  const item = ITEMS.find((i) => i.id === id);
+  const item = findItem(id);
   if (!item) throw new Error(`未知装备: ${id}`);
   return item;
+}
+
+export function findItem(id: string): ItemDef | undefined {
+  return ITEMS.find((i) => i.id === id);
 }
 
 export function canAfford(item: ItemDef, gold: number, owned: string[]): boolean {
