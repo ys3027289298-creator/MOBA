@@ -6,6 +6,7 @@ import type { GameEntity, Hero, Vec2 } from '../engine/types';
 import type { MatchRecord } from '../storage';
 import { saveRecord } from '../storage';
 import { HUD } from '../ui/HUD';
+import { buildMatchRecord } from './record';
 
 interface RenderObject {
   container: Phaser.GameObjects.Container;
@@ -345,20 +346,7 @@ export class ArenaScene extends Phaser.Scene {
 
   private finishMatch() {
     this.savedRecord = true;
-    const model = this.gameModel;
-    const player = model.player;
-    const record: MatchRecord = {
-      result: model.result === 'running' ? 'timeout' : model.result,
-      duration: model.time,
-      playerHero: player.heroId,
-      enemyHero: model.enemy.heroId,
-      kills: player.kills,
-      deaths: player.deaths,
-      lastHits: player.lastHits,
-      gold: player.gold,
-      damage: Math.round(player.damageToHeroes),
-      date: new Date().toISOString()
-    };
+    const record: MatchRecord = buildMatchRecord(this.gameModel);
     saveRecord(record);
     setTimeout(() => this.callbacks.onEnd(record), 600);
   }

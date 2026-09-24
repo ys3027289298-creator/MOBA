@@ -6,6 +6,7 @@ import { MAP_H, MAP_W } from './engine/map';
 import { ArenaScene, type SceneCallbacks } from './game/ArenaScene';
 import { Game, type GameConfig } from './engine/game';
 import { ShopPanel } from './ui/shop';
+import { createTimelinePanel } from './ui/timelinePanel';
 import { loadRecords, loadSettings, saveSettings, type MatchRecord } from './storage';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -182,6 +183,7 @@ function showResult(record: MatchRecord) {
   );
   card.append(actions);
   screen.append(card);
+  screen.append(createTimelinePanel(record));
   app.append(screen);
   phaser?.destroy(true);
   phaser = null;
@@ -217,11 +219,30 @@ function renderRecords() {
   screen.innerHTML = '<div class="logo" style="font-size:38px">对战记录</div>';
   const table = el('div', 'records');
   table.innerHTML = `<table><thead><tr><th>时间</th><th>英雄</th><th>结果</th><th>时长</th><th>K/D</th><th>补刀</th><th>伤害</th></tr></thead><tbody>
-    ${records.map((r) => `<tr><td>${new Date(r.date).toLocaleString()}</td><td>${getHeroDef(r.playerHero).name}</td><td>${r.result}</td><td>${fmtTime(r.duration)}</td><td>${r.kills}/${r.deaths}</td><td>${r.lastHits}</td><td>${r.damage}</td></tr>`).join('') || '<tr><td colspan="7">暂无记录</td></tr>'}
+    ${records.map((r, i) => `<tr data-index="${i}" class="record-row"><td>${new Date(r.date).toLocaleString()}</td><td>${getHeroDef(r.playerHero).name}</td><td>${r.result}</td><td>${fmtTime(r.duration)}</td><td>${r.kills}/${r.deaths}</td><td>${r.lastHits}</td><td>${r.damage}</td></tr>`).join('') || '<tr><td colspan="7">暂无记录</td></tr>'}
   </tbody></table>`;
+  table.querySelectorAll<HTMLTableRowElement>('tr.record-row').forEach((row) => {
+    row.onclick = () => {
+      const record = records[Number(row.dataset.index)];
+      if (record) renderRecordDetail(record);
+    };
+  });
   const actions = el('div', 'menu-actions');
   actions.append(Object.assign(el('button', 'primary', '返回'), { onclick: renderMenu }));
   screen.append(table, actions);
+  app.append(screen);
+}
+
+function renderRecordDetail(record: MatchRecord) {
+  app.innerHTML = '';
+  const screen = el('div', 'screen');
+  screen.innerHTML = '<div class="logo" style="font-size:38px">记录详情</div>';
+  const summary = el('div', 'record-detail');
+  summary.innerHTML = `<p>${getHeroDef(record.playerHero).name} 对战 ${getHeroDef(record.enemyHero).name}｜${record.result}｜时长 ${fmtTime(record.duration)}｜K/D ${record.kills}/${record.deaths}｜补刀 ${record.lastHits}｜伤害 ${record.damage}</p>
+    <p>${new Date(record.date).toLocaleString()}</p>`;
+  const actions = el('div', 'menu-actions');
+  actions.append(Object.assign(el('button', 'primary', '返回记录列表'), { onclick: renderRecords }));
+  screen.append(summary, createTimelinePanel(record), actions);
   app.append(screen);
 }
 

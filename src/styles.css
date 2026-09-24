@@ -43,3 +43,30 @@ button { font-family: inherit; cursor: pointer; }
 .records { width: min(820px, 90vw); max-height: 50vh; overflow: auto; border: 1px solid #2c406e; border-radius: 10px; }
 .records table { width: 100%; border-collapse: collapse; }
 .records th, .records td { padding: 8px; border-bottom: 1px solid #1f3156; text-align: center; }
+
+.timeline-panel { width: min(720px, 90vw); margin-top: 18px; background: rgba(8,18,38,.9); border: 1px solid #2c406e; border-radius: 14px; padding: 16px 20px; }
+.timeline-panel h2 { margin: 0 0 10px; font-size: 20px; color: #8ecae6; }
+.timeline-filters { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.timeline-filters button { border: 1px solid #3a5387; background: #101b35; color: #cfe0ff; padding: 5px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.timeline-filters button.active { background: #1d315b; border-color: #8ecae6; color: #fff; }
+.timeline-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.timeline-row { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; background: rgba(20,34,64,.6); font-size: 13px; }
+.timeline-time { color: #ffd166; font-variant-numeric: tabular-nums; min-width: 42px; }
+.timeline-team { min-width: 36px; text-align: center; border-radius: 4px; padding: 1px 4px; font-size: 12px; }
+.timeline-team.team-0 { color: #80edff; }
+.timeline-team.team-1 { color: #ff8fa3; }
+.timeline-team.team-all { color: #c8b6ff; }
+.timeline-text { flex: 1; color: #e5eefc; }
+.timeline-category { font-size: 11px; color: #8ea3c8; }
+.timeline-row.cat-combat { border-left: 3px solid #ff7b7b; }
+.timeline-row.cat-objective { border-left: 3px solid #ffd166; }
+.timeline-row.cat-economy { border-left: 3px solid #80ed99; }
+.timeline-row.cat-system { border-left: 3px solid #8ecae6; }
+.timeline-empty { color: #8ea3c8; text-align: center; padding: 18px 0; font-size: 13px; }
+.timeline-actions { display: flex; gap: 10px; margin-top: 12px; }
+.timeline-actions button { border: 1px solid #5271b8; background: linear-gradient(180deg, #1d315b, #101b35); color: #e5eefc; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.timeline-actions button:hover { border-color: #8ecae6; }
+.timeline-hint { color: #ffd166; font-size: 12px; min-height: 16px; margin-top: 8px; }
+.record-row { cursor: pointer; }
+.record-row:hover { background: rgba(76,201,240,.08); }
+.record-detail { color: #cfe0ff; text-align: center; font-size: 14px; }
