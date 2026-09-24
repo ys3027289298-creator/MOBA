@@ -115,9 +115,74 @@ async function defeatFlow() {
   return { name: '玩家基地核心被摧毁并显示失败', data, shown };
 }
 
+async function trainingFlow() {
+  const browser = await puppeteer.launch({ executablePath: edge, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle0' });
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('练习模式')).click());
+  await page.waitForSelector('.hero-card');
+  const configVisible = await page.evaluate(() => {
+    const level = document.querySelector('#train-level');
+    const gold = document.querySelector('#train-gold');
+    if (!level || !gold) return false;
+    level.value = '8';
+    level.dispatchEvent(new Event('change'));
+    gold.value = '6000';
+    gold.dispatchEvent(new Event('change'));
+    return true;
+  });
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('进入对战')).click());
+  await page.waitForSelector('#phaser-container canvas');
+  await page.waitForSelector('.training-panel');
+  await wait(800);
+  const data = await page.evaluate(async () => {
+    const game = window.__starRingGame;
+    const hero = game.player;
+    const init = { level: hero.level, gold: hero.gold, targets: game.trainingTargets.length };
+    hero.skillLevels[0] = 1;
+    hero.mana = hero.maxMana;
+    const cast = game.castSkill(hero, 0, { point: { x: hero.pos.x + 120, y: hero.pos.y } });
+    game.spawnWaveNow();
+    const minionsBefore = game.minions.length;
+    const click = (text) => [...document.querySelectorAll('.training-panel button')].find((b) => b.textContent.includes(text))?.click();
+    click('重置场景');
+    const afterReset = {
+      minions: game.minions.length,
+      cooldown: game.player.cooldowns.Q,
+      gold: game.player.gold,
+      level: game.player.level,
+      pending: game.pendingEffects.length
+    };
+    click('生成/刷新测试目标');
+    const targetsAfter = game.trainingTargets.length;
+    const target = game.trainingTargets[0];
+    target.hp = 100;
+    click('生成/刷新测试目标');
+    const refreshed = target.hp === target.maxHp;
+    game.paused = true;
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    const disabledWhenPaused = [...document.querySelectorAll('.training-panel button')].every((b) => b.disabled);
+    game.paused = false;
+    return { init, cast, minionsBefore, afterReset, targetsAfter, refreshed, disabledWhenPaused };
+  });
+  await page.screenshot({ path: 'screenshot-training.png' });
+  await browser.close();
+  const ok = configVisible
+    && data.init.level === 8 && data.init.gold === 6000 && data.init.targets === 3
+    && data.cast && data.minionsBefore >= 8
+    && data.afterReset.minions === 0 && data.afterReset.cooldown === 0
+    && data.afterReset.gold === 6000 && data.afterReset.level === 8 && data.afterReset.pending === 0
+    && data.targetsAfter === 3 && data.refreshed && data.disabledWhenPaused;
+  if (!ok) throw new Error(`训练沙盒流程失败 ${JSON.stringify(data)} config=${configVisible}`);
+  return { name: '练习入口/配置/重置/目标刷新', data, errors };
+}
+
 const results = [];
 results.push(await basicFlow());
 results.push(await killFlow());
 results.push(await victoryFlow());
 results.push(await defeatFlow());
+results.push(await trainingFlow());
 console.log(JSON.stringify(results, null, 2));

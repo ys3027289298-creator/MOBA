@@ -1,6 +1,6 @@
 import { getHeroDef } from '../data/heroes';
 import { getItem } from '../data/items';
-import type { Hero, Minion, MinionType, Stats, Team, Vec2, Building, DamageType } from './types';
+import type { Hero, Minion, MinionType, Stats, Team, Vec2, Building, DamageType, TrainingTarget } from './types';
 
 let nextId = 1;
 export const newId = () => nextId++;
@@ -157,4 +157,21 @@ export function createBuildings(): Building[] {
     });
   }
   return buildings;
+}
+
+export function createTrainingTarget(pos: Vec2): TrainingTarget {
+  return {
+    id: newId(),
+    kind: 'target',
+    team: 1,
+    name: '训练木桩',
+    pos: { ...pos },
+    radius: 20,
+    hp: 1500,
+    maxHp: 1500,
+    alive: true,
+    statuses: [],
+    attackCd: 0,
+    damageTaken: 0
+  };
 }

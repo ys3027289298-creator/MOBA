@@ -207,6 +207,7 @@ export class ArenaScene extends Phaser.Scene {
   private entityColor(entity: GameEntity): number {
     if (entity.kind === 'hero') return getHeroDef((entity as Hero).heroId).color;
     if (entity.kind === 'minion') return entity.team === 0 ? 0x4cc9f0 : 0xff6b6b;
+    if (entity.kind === 'target') return 0xffd166;
     return entity.team === 0 ? 0x90e0ef : 0xff8fa3;
   }
 
@@ -351,7 +352,7 @@ export class ArenaScene extends Phaser.Scene {
       result: model.result === 'running' ? 'timeout' : model.result,
       duration: model.time,
       playerHero: player.heroId,
-      enemyHero: model.enemy.heroId,
+      enemyHero: model.enemy?.heroId ?? model.config.enemyHero ?? player.heroId,
       kills: player.kills,
       deaths: player.deaths,
       lastHits: player.lastHits,

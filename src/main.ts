@@ -5,13 +5,16 @@ import { ITEMS } from './data/items';
 import { MAP_H, MAP_W } from './engine/map';
 import { ArenaScene, type SceneCallbacks } from './game/ArenaScene';
 import { Game, type GameConfig } from './engine/game';
+import { DEFAULT_TRAINING_CONFIG, TRAINING_LIMITS, normalizeTrainingConfig, type TrainingConfig } from './engine/training';
 import { ShopPanel } from './ui/shop';
+import { TrainingPanel } from './ui/trainingPanel';
 import { loadRecords, loadSettings, saveSettings, type MatchRecord } from './storage';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let phaser: Phaser.Game | null = null;
 let model: Game | null = null;
 let shop: ShopPanel | null = null;
+let trainingPanel: TrainingPanel | null = null;
 let shopTimer: number | undefined;
 let keyHandler: ((event: KeyboardEvent) => void) | undefined;
 
@@ -53,6 +56,7 @@ function renderMenu() {
 function renderHeroSelect(mode: GameConfig['mode']) {
   app.innerHTML = '';
   let selected = mode === 'practice' ? 'veilora' : 'emberfang';
+  const trainingInput: Partial<TrainingConfig> = { ...DEFAULT_TRAINING_CONFIG };
   const screen = el('div', 'screen');
   screen.append(el('div', 'logo', mode === 'practice' ? '选择练习英雄' : '选择决斗英雄'));
   const grid = el('div', 'hero-grid');
@@ -75,16 +79,56 @@ function renderHeroSelect(mode: GameConfig['mode']) {
   cards.get(selected)?.classList.add('selected');
   const actions = el('div', 'menu-actions');
   actions.append(
-    Object.assign(el('button', 'primary', '进入对战'), { onclick: () => startGame(mode, selected) }),
+    Object.assign(el('button', 'primary', '进入对战'), {
+      onclick: () => startGame(mode, selected, mode === 'practice' ? normalizeTrainingConfig(trainingInput) : undefined)
+    }),
     Object.assign(el('button', '', '返回主菜单'), { onclick: renderMenu })
   );
-  screen.append(grid, actions);
+  screen.append(grid);
+  if (mode === 'practice') screen.append(renderTrainingConfig(trainingInput));
+  screen.append(actions);
   app.append(screen);
 }
 
-function startGame(mode: GameConfig['mode'], heroId: string) {
+function renderTrainingConfig(state: Partial<TrainingConfig>) {
+  const panel = el('div', 'training-config');
+  panel.append(el('div', 'training-config-title', '训练配置'));
+  const numberRow = (label: string, key: 'startLevel' | 'startGold', min: number, max: number, step: number, id: string) => {
+    const row = el('label', 'training-row', `<span>${label}</span>`);
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = id;
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(state[key]);
+    input.onchange = () => { state[key] = Number(input.value); };
+    row.append(input);
+    return row;
+  };
+  const checkRow = (label: string, key: 'fullMana' | 'enemyEnabled' | 'autoWaves', id: string) => {
+    const row = el('label', 'training-row', `<span>${label}</span>`);
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = id;
+    input.checked = Boolean(state[key]);
+    input.onchange = () => { state[key] = input.checked; };
+    row.append(input);
+    return row;
+  };
+  panel.append(
+    numberRow(`初始等级（${TRAINING_LIMITS.minLevel}–${TRAINING_LIMITS.maxLevel}）`, 'startLevel', TRAINING_LIMITS.minLevel, TRAINING_LIMITS.maxLevel, 1, 'train-level'),
+    numberRow(`初始金币（${TRAINING_LIMITS.minGold}–${TRAINING_LIMITS.maxGold}）`, 'startGold', TRAINING_LIMITS.minGold, TRAINING_LIMITS.maxGold, 100, 'train-gold'),
+    checkRow('初始满法力', 'fullMana', 'train-fullmana'),
+    checkRow('开启电脑对手', 'enemyEnabled', 'train-enemy'),
+    checkRow('自动生成兵线', 'autoWaves', 'train-waves')
+  );
+  return panel;
+}
+
+function startGame(mode: GameConfig['mode'], heroId: string, training?: TrainingConfig) {
   app.innerHTML = '';
-  model = new Game({ mode, playerHero: heroId });
+  model = new Game({ mode, playerHero: heroId, training: mode === 'practice' ? training : undefined });
   const screen = el('div', 'screen', '') as HTMLDivElement;
   screen.classList.remove('screen');
   screen.id = 'game-screen';
@@ -97,6 +141,11 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   topButtons.append(pauseButton, restartButton, exitButton);
   shop = new ShopPanel(model, undefined);
   screen.append(container, shop.element, topButtons);
+  trainingPanel = null;
+  if (mode === 'practice') {
+    trainingPanel = new TrainingPanel(model);
+    screen.append(trainingPanel.element);
+  }
   app.append(screen);
   const callbacks: SceneCallbacks = { onEnd: showResult, onExit: renderMenu };
   phaser = new Phaser.Game({
@@ -111,9 +160,12 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   (window as unknown as { __starRingGame?: Game }).__starRingGame = model;
   phaser.scene.start('arena', { model, callbacks });
   const refreshShop = () => shop?.render();
-  shopTimer = window.setInterval(() => { if (model?.result === 'running') shop?.render(); }, 1000);
+  shopTimer = window.setInterval(() => {
+    if (model?.result === 'running') shop?.render();
+    trainingPanel?.refresh();
+  }, 1000);
   pauseButton.onclick = () => togglePause(true);
-  restartButton.onclick = () => { destroyPhaser(); startGame(mode, heroId); };
+  restartButton.onclick = () => { destroyPhaser(); startGame(mode, heroId, training); };
   exitButton.onclick = () => { destroyPhaser(); renderMenu(); };
   keyHandler = onKey;
   window.addEventListener('keydown', onKey);
@@ -124,6 +176,7 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   }
   function togglePause(paused: boolean) {
     model!.paused = paused;
+    trainingPanel?.refresh();
     let overlay = document.querySelector('.pause-overlay');
     if (paused && !overlay) {
       overlay = el('div', 'pause-overlay');
@@ -132,7 +185,7 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
       const restart = el('button', '', '重新开始');
       const exit = el('button', '', '返回主菜单');
       resume.onclick = () => togglePause(false);
-      restart.onclick = () => { destroyPhaser(); startGame(mode, heroId); };
+      restart.onclick = () => { destroyPhaser(); startGame(mode, heroId, training); };
       exit.onclick = () => { destroyPhaser(); renderMenu(); };
       overlay.append(resume, restart, exit);
       screen.append(overlay);
@@ -151,6 +204,7 @@ function destroyPhaser() {
   phaser?.destroy(true);
   phaser = null;
   model = null;
+  trainingPanel = null;
 }
 
 function showResult(record: MatchRecord) {
@@ -177,7 +231,7 @@ function showResult(record: MatchRecord) {
     <p><b>基地状态：</b>蓝方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 0)!.hp)} / 红方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 1)!.hp)}</p>`;
   const actions = el('div', 'menu-actions');
   actions.append(
-    Object.assign(el('button', 'primary', '再来一局'), { onclick: () => startGame(finalModel.config.mode, record.playerHero) }),
+    Object.assign(el('button', 'primary', '再来一局'), { onclick: () => startGame(finalModel.config.mode, record.playerHero, finalModel.training) }),
     Object.assign(el('button', '', '返回主菜单'), { onclick: renderMenu })
   );
   card.append(actions);

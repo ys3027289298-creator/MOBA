@@ -1,7 +1,7 @@
 export type Team = 0 | 1;
 export type DamageType = 'physical' | 'energy';
 export type ControlType = 'slow' | 'stun' | 'knockback' | 'silence';
-export type EntityKind = 'hero' | 'minion' | 'turret' | 'core' | 'ward';
+export type EntityKind = 'hero' | 'minion' | 'turret' | 'core' | 'ward' | 'target';
 export type MinionType = 'melee' | 'ranged' | 'siege';
 
 export interface Vec2 { x: number; y: number }
@@ -94,6 +94,10 @@ export interface Minion extends GameEntity {
   bountyXp: number;
   wave: number;
   promoted?: boolean;
+}
+
+export interface TrainingTarget extends GameEntity {
+  kind: 'target';
 }
 
 export interface Building extends GameEntity {

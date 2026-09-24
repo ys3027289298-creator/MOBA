@@ -43,3 +43,14 @@ button { font-family: inherit; cursor: pointer; }
 .records { width: min(820px, 90vw); max-height: 50vh; overflow: auto; border: 1px solid #2c406e; border-radius: 10px; }
 .records table { width: 100%; border-collapse: collapse; }
 .records th, .records td { padding: 8px; border-bottom: 1px solid #1f3156; text-align: center; }
+.training-config { width: min(520px, 90vw); background: rgba(10,20,40,.86); border: 1px solid #355083; border-radius: 12px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+.training-config-title { font-weight: 800; color: #ffd166; font-size: 16px; }
+.training-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; color: #bfd2ef; font-size: 14px; }
+.training-row input[type="number"] { width: 110px; background: #101b35; color: #e5eefc; border: 1px solid #2c406e; border-radius: 6px; padding: 5px 8px; }
+.training-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #4cc9f0; }
+.training-panel { position: absolute; right: 16px; top: 96px; z-index: 55; width: 168px; background: rgba(5,12,25,.9); border: 1px solid #355083; border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.training-title { font-weight: 800; color: #ffd166; font-size: 14px; margin-bottom: 2px; }
+.training-panel button { background: #101b35; color: #e5eefc; border: 1px solid #2c406e; border-radius: 8px; padding: 7px 8px; font-size: 13px; text-align: left; }
+.training-panel button:hover:not(:disabled) { border-color: #8ecae6; }
+.training-panel button:disabled { opacity: .4; cursor: not-allowed; }
+.training-feedback { min-height: 16px; font-size: 12px; color: #80ed99; }

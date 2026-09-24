@@ -7,17 +7,19 @@ import {
 } from './map';
 import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpForLevel } from './progression';
 import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
-import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
+import { createBuildings, createHero, createMinion, createTrainingTarget, makeStats, newId, type CombatMinion } from './factory';
 import { skillDefAt } from './skills';
+import { DEFAULT_TRAINING_CONFIG, TRAINING_LIMITS, normalizeTrainingConfig, trainingCommandsEnabled, type TrainingConfig } from './training';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
-  Projectile, Status, Team, Vec2
+  Projectile, Status, Team, TrainingTarget, Vec2
 } from './types';
 
 export interface GameConfig {
   mode: 'practice' | 'full';
   playerHero: string;
   enemyHero?: string;
+  training?: Partial<TrainingConfig>;
 }
 
 export interface ArenaEventState {
@@ -31,9 +33,11 @@ export interface ArenaEventState {
 
 export class Game {
   config: GameConfig;
+  training?: TrainingConfig;
   time = 0;
   heroes: Hero[] = [];
   minions: Minion[] = [];
+  trainingTargets: TrainingTarget[] = [];
   buildings: Building[] = [];
   projectiles: Projectile[] = [];
   texts: FloatingText[] = [];
@@ -53,19 +57,125 @@ export class Game {
   notifications: { text: string; t: number; color: string }[] = [];
   pendingEffects: { t: number; action: () => void }[] = [];
   private textId = 1;
+  private enemyHeroId: string;
 
   constructor(config: GameConfig) {
     this.config = config;
-    if (config.mode === 'practice') this.waveTimer = 2;
+    this.training = config.mode === 'practice' ? normalizeTrainingConfig(config.training) : undefined;
+    if (config.mode === 'practice') this.waveTimer = this.training!.autoWaves ? 2 : FIRST_WAVE;
     this.heroes.push(createHero(config.playerHero, 0, true));
-    const enemyId = config.enemyHero ?? ['emberfang', 'veilora', 'thorvall', 'lumi'].find((id) => id !== config.playerHero)!;
-    this.heroes.push(createHero(enemyId, 1, false));
+    this.enemyHeroId = config.enemyHero ?? ['emberfang', 'veilora', 'thorvall', 'lumi'].find((id) => id !== config.playerHero)!;
+    if (!this.training || this.training.enemyEnabled) {
+      this.heroes.push(createHero(this.enemyHeroId, 1, false));
+    }
+    if (this.training) {
+      this.applyTrainingInit(this.player);
+      this.refreshTrainingTargets();
+    }
     this.buildings = createBuildings();
     this.scheduleEvents();
   }
 
   get player(): Hero { return this.heroes[0]; }
   get enemy(): Hero { return this.heroes[1]; }
+
+  private applyTrainingInit(hero: Hero) {
+    const training = this.training ?? DEFAULT_TRAINING_CONFIG;
+    hero.level = training.startLevel;
+    hero.xp = 0;
+    hero.stats = makeStats(hero.heroId, hero.level, hero.items);
+    hero.maxHp = hero.stats.maxHp;
+    hero.maxMana = hero.stats.maxMana;
+    hero.hp = hero.maxHp;
+    hero.mana = training.fullMana ? hero.maxMana : Math.round(hero.maxMana * 0.5);
+    hero.gold = training.startGold;
+  }
+
+  canUseTrainingControls(): boolean {
+    return !!this.training && trainingCommandsEnabled(this);
+  }
+
+  resetTrainingScenario(): boolean {
+    if (!this.training) return false;
+    this.minions = [];
+    this.projectiles = [];
+    this.wards = [];
+    this.texts = [];
+    this.notifications = [];
+    this.pendingEffects = [];
+    this.kills = [];
+    this.score = [0, 0];
+    this.blockade = null;
+    this.weather = { kind: 'none', ttl: 0 };
+    this.energyNode = { pos: { x: 840, y: 520 }, ttl: 0, active: false, hold: [0, 0] };
+    this.baseAlarm = [0, 0];
+    this.time = 0;
+    this.waveNumber = 0;
+    this.waveTimer = this.training.autoWaves ? 2 : FIRST_WAVE;
+    this.scheduleEvents();
+    const player = createHero(this.config.playerHero, 0, true);
+    this.applyTrainingInit(player);
+    this.heroes = [player];
+    if (this.training.enemyEnabled) this.heroes.push(createHero(this.enemyHeroId, 1, false));
+    this.buildings = createBuildings();
+    this.trainingTargets = [];
+    this.refreshTrainingTargets();
+    return true;
+  }
+
+  restorePlayerState(): boolean {
+    if (!this.training) return false;
+    const hero = this.player;
+    hero.alive = true;
+    hero.hp = hero.maxHp;
+    hero.mana = hero.maxMana;
+    hero.statuses = [];
+    hero.cooldowns = { Q: 0, W: 0, E: 0, R: 0, D: 0, F: 0 };
+    hero.recall = 0;
+    hero.deadTimer = 0;
+    hero.pos = { ...BLUE_BASE };
+    hero.moveTarget = undefined;
+    hero.attackTargetId = undefined;
+    hero.abilityCast = undefined;
+    return true;
+  }
+
+  clearUnits(): boolean {
+    if (!this.training) return false;
+    this.minions = [];
+    this.projectiles = [];
+    this.wards = [];
+    return true;
+  }
+
+  spawnWaveNow(): boolean {
+    if (!this.training) return false;
+    this.waveNumber++;
+    this.waveTimer = WAVE_INTERVAL;
+    for (const team of [0, 1] as Team[]) this.spawnWave(team, false);
+    return true;
+  }
+
+  refreshTrainingTargets(): boolean {
+    if (!this.training) return false;
+    const spots: Vec2[] = [
+      { x: 430, y: 400 },
+      { x: 540, y: 375 },
+      { x: 480, y: 315 }
+    ];
+    for (const target of this.trainingTargets) {
+      target.alive = true;
+      target.hp = target.maxHp;
+      target.statuses = [];
+    }
+    while (this.trainingTargets.length < TRAINING_LIMITS.maxTargets) {
+      this.trainingTargets.push(createTrainingTarget(spots[this.trainingTargets.length % spots.length]));
+    }
+    if (this.trainingTargets.length > TRAINING_LIMITS.maxTargets) {
+      this.trainingTargets = this.trainingTargets.slice(0, TRAINING_LIMITS.maxTargets);
+    }
+    return true;
+  }
 
   private scheduleEvents() {
     this.events = [
@@ -88,7 +198,7 @@ export class Game {
   }
 
   allEntities(): GameEntity[] {
-    return [...this.heroes, ...this.minions, ...this.buildings];
+    return [...this.heroes, ...this.minions, ...this.trainingTargets, ...this.buildings];
   }
 
   entityById(id: number): GameEntity | undefined {
@@ -135,6 +245,7 @@ export class Game {
   }
 
   private spawnWaves(dt: number) {
+    if (this.training && !this.training.autoWaves) return;
     this.waveTimer -= dt;
     if (this.waveTimer > 0) return;
     this.waveNumber++;
@@ -543,6 +654,8 @@ export class Game {
     } else if (victim.kind === 'minion') {
       const minion = victim as Minion;
       this.creditMinion(minion, killer);
+    } else if (victim.kind === 'target') {
+      this.floatText('目标被击破', victim.pos, '#ffd166');
     } else if (victim.kind === 'turret' || victim.kind === 'core') {
       const reward = victim.kind === 'turret' ? 250 : 0;
       for (const hero of this.heroes.filter((h) => h.team !== victim.team)) {
