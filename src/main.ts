@@ -7,6 +7,7 @@ import { ArenaScene, type SceneCallbacks } from './game/ArenaScene';
 import { Game, type GameConfig } from './engine/game';
 import { ShopPanel } from './ui/shop';
 import { loadRecords, loadSettings, saveSettings, type MatchRecord } from './storage';
+import { createTimelinePanel } from './ui/timeline';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 let phaser: Phaser.Game | null = null;
@@ -98,7 +99,7 @@ function startGame(mode: GameConfig['mode'], heroId: string) {
   shop = new ShopPanel(model, undefined);
   screen.append(container, shop.element, topButtons);
   app.append(screen);
-  const callbacks: SceneCallbacks = { onEnd: showResult, onExit: renderMenu };
+  const callbacks: SceneCallbacks = { onEnd: (record) => { if (model) showResult(record, model); }, onExit: renderMenu };
   phaser = new Phaser.Game({
     type: Phaser.AUTO,
     parent: container,
@@ -153,9 +154,7 @@ function destroyPhaser() {
   model = null;
 }
 
-function showResult(record: MatchRecord) {
-  if (!model) return;
-  const finalModel = model;
+export function showResult(record: MatchRecord, finalModel: Game) {
   const hero = finalModel.player;
   const title = record.result === 'victory' ? '胜利' : record.result === 'defeat' ? '失败' : '超时';
   const color = record.result === 'victory' ? '#80ed99' : record.result === 'timeout' ? '#ffd166' : '#ff7b7b';
@@ -175,6 +174,7 @@ function showResult(record: MatchRecord) {
     </div>
     <p><b>最终装备：</b>${hero.items.map((id) => ITEMS.find((i) => i.id === id)?.name).join('、') || '无'}</p>
     <p><b>基地状态：</b>蓝方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 0)!.hp)} / 红方核心 ${Math.ceil(finalModel.buildings.find((b) => b.kind === 'core' && b.team === 1)!.hp)}</p>`;
+  card.append(createTimelinePanel(record.timeline));
   const actions = el('div', 'menu-actions');
   actions.append(
     Object.assign(el('button', 'primary', '再来一局'), { onclick: () => startGame(finalModel.config.mode, record.playerHero) }),
@@ -217,11 +217,39 @@ function renderRecords() {
   screen.innerHTML = '<div class="logo" style="font-size:38px">对战记录</div>';
   const table = el('div', 'records');
   table.innerHTML = `<table><thead><tr><th>时间</th><th>英雄</th><th>结果</th><th>时长</th><th>K/D</th><th>补刀</th><th>伤害</th></tr></thead><tbody>
-    ${records.map((r) => `<tr><td>${new Date(r.date).toLocaleString()}</td><td>${getHeroDef(r.playerHero).name}</td><td>${r.result}</td><td>${fmtTime(r.duration)}</td><td>${r.kills}/${r.deaths}</td><td>${r.lastHits}</td><td>${r.damage}</td></tr>`).join('') || '<tr><td colspan="7">暂无记录</td></tr>'}
+    ${records.map((r, i) => `<tr data-index="${i}" class="record-row"><td>${new Date(r.date).toLocaleString()}</td><td>${getHeroDef(r.playerHero).name}</td><td>${r.result}</td><td>${fmtTime(r.duration)}</td><td>${r.kills}/${r.deaths}</td><td>${r.lastHits}</td><td>${r.damage}</td></tr>`).join('') || '<tr><td colspan="7">暂无记录</td></tr>'}
   </tbody></table>`;
+  table.querySelectorAll<HTMLTableRowElement>('tr.record-row').forEach((row) => {
+    row.onclick = () => {
+      const record = records[Number(row.dataset.index)];
+      if (record) renderRecordDetail(record);
+    };
+  });
   const actions = el('div', 'menu-actions');
   actions.append(Object.assign(el('button', 'primary', '返回'), { onclick: renderMenu }));
   screen.append(table, actions);
+  app.append(screen);
+}
+
+function renderRecordDetail(record: MatchRecord) {
+  app.innerHTML = '';
+  const screen = el('div', 'screen');
+  screen.innerHTML = '<div class="logo" style="font-size:38px">比赛详情</div>';
+  const card = el('div', 'result-card');
+  card.innerHTML = `
+    <p style="text-align:center">${getHeroDef(record.playerHero).name} 对战 ${getHeroDef(record.enemyHero).name}｜${record.result}｜比赛时间 ${fmtTime(record.duration)}</p>
+    <div class="result-grid">
+      <div class="stat"><b>${record.kills}</b>击杀</div>
+      <div class="stat"><b>${record.deaths}</b>死亡</div>
+      <div class="stat"><b>${record.lastHits}</b>补刀</div>
+      <div class="stat"><b>${Math.floor(record.gold)}</b>剩余金币</div>
+      <div class="stat"><b>${record.damage}</b>英雄伤害</div>
+      <div class="stat"><b>${new Date(record.date).toLocaleDateString()}</b>日期</div>
+    </div>`;
+  card.append(createTimelinePanel(record.timeline));
+  const actions = el('div', 'menu-actions');
+  actions.append(Object.assign(el('button', 'primary', '返回记录列表'), { onclick: renderRecords }));
+  screen.append(card, actions);
   app.append(screen);
 }
 

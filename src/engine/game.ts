@@ -9,6 +9,7 @@ import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpFo
 import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
 import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
 import { skillDefAt } from './skills';
+import { TimelineRecorder } from './timeline';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
   Projectile, Status, Team, Vec2
@@ -52,6 +53,7 @@ export class Game {
   baseAlarm: [number, number] = [0, 0];
   notifications: { text: string; t: number; color: string }[] = [];
   pendingEffects: { t: number; action: () => void }[] = [];
+  timeline = new TimelineRecorder();
   private textId = 1;
 
   constructor(config: GameConfig) {
@@ -140,6 +142,12 @@ export class Game {
     this.waveNumber++;
     this.waveTimer = WAVE_INTERVAL;
     for (const team of [0, 1] as Team[]) this.spawnWave(team, false);
+    this.timeline.log({
+      time: this.time,
+      type: 'wave_spawn',
+      text: `第 ${this.waveNumber} 波兵线出发`,
+      dedupeKey: `wave:${this.waveNumber}`
+    });
   }
 
   spawnWave(team: Team, promoted: boolean) {
@@ -178,6 +186,7 @@ export class Game {
     event.active = true;
     event.startsIn = event.duration || 0.1;
     this.notify(`${event.name}：${event.description}`, '#8ecae6');
+    this.timeline.log({ time: this.time, type: 'event_start', text: `${event.name} 开始` });
     if (event.id === 'surge') {
       this.waveNumber++;
       for (const team of [0, 1] as Team[]) this.spawnWave(team, true);
@@ -201,6 +210,7 @@ export class Game {
     event.active = false;
     if (event.id === 'energy') this.energyNode.active = false;
     if (event.id === 'blockade') this.blockade = null;
+    this.timeline.log({ time: this.time, type: 'event_end', text: `${event.name} 结束` });
     const repeat: Record<string, number> = { surge: 150, energy: 110, storm: 170, blockade: 160, alarm: 220, aurora: 200 };
     event.startsIn = repeat[event.id] ?? 180;
   }
@@ -267,6 +277,13 @@ export class Game {
         hero.hp = hero.maxHp;
         hero.mana = hero.maxMana;
         this.floatText('回城完成', hero.pos, '#80ed99');
+        this.timeline.log({
+          time: this.time,
+          type: 'recall_complete',
+          team: hero.team,
+          actor: hero.name,
+          text: `${hero.name} 回城完成`
+        });
       }
       return;
     }
@@ -525,6 +542,14 @@ export class Game {
       const hero = victim as Hero;
       hero.deaths++;
       hero.deadTimer = Math.min(42, 10 + hero.level * 3);
+      this.timeline.log({
+        time: this.time,
+        type: 'hero_death',
+        team: hero.team,
+        actor: hero.name,
+        text: killer ? `${hero.name} 被 ${killer.name} 击杀` : `${hero.name} 阵亡`,
+        dedupeKey: `death:${hero.id}:${hero.deaths}`
+      });
       if (killer?.kind === 'hero') {
         killer as Hero;
         const slayer = killer as Hero;
@@ -533,6 +558,14 @@ export class Game {
         this.giveXp(slayer, 160 + hero.level * 18);
         this.score[slayer.team]++;
         this.notify(`${slayer.name} 击杀了 ${hero.name}`, '#ff7b7b');
+        this.timeline.log({
+          time: this.time,
+          type: 'hero_kill',
+          team: slayer.team,
+          actor: slayer.name,
+          text: `${slayer.name} 击杀了 ${hero.name}${skill ? `（${skill}）` : ''}`,
+          dedupeKey: `kill:${slayer.id}:${slayer.kills}`
+        });
       } else {
         this.notify(`${hero.name} 阵亡`, '#ffd166');
       }
@@ -550,6 +583,15 @@ export class Game {
         this.giveXp(hero, 120);
       }
       this.notify(killer ? `${victim.name} 被摧毁` : `${victim.name} 被摧毁`, '#8ecae6');
+      this.timeline.log({
+        time: this.time,
+        type: 'building_destroyed',
+        team: victim.team,
+        actor: victim.name,
+        text: `${victim.name} 被摧毁`,
+        pinned: victim.kind === 'core',
+        dedupeKey: `building:${victim.id}`
+      });
     }
   }
 
@@ -608,6 +650,13 @@ export class Game {
     hero.moveTarget = undefined;
     hero.attackTargetId = undefined;
     this.notify(`${hero.name} 已复活`, '#80ed99');
+    this.timeline.log({
+      time: this.time,
+      type: 'hero_respawn',
+      team: hero.team,
+      actor: hero.name,
+      text: `${hero.name} 已复活`
+    });
   }
 
   canCast(hero: Hero, slot: number): { ok: boolean; reason?: string } {
@@ -648,6 +697,13 @@ export class Game {
     const cdr = 1 - Math.min(0.4, hero.items.reduce((sum, id) => sum + (getItem(id).stats.cooldownReduce ?? 0), 0));
     hero.cooldowns[def.key] = def.cooldown(level) * cdr;
     hero.recall = 0;
+    this.timeline.log({
+      time: this.time,
+      type: 'skill_cast',
+      team: hero.team,
+      actor: hero.name,
+      text: `${hero.name} 释放了 ${def.name}`
+    });
     if (slot < 4) this.executeHeroSkill(hero, slot, level, input, point ?? hero.pos);
     else this.executeTactical(hero, slot, point ?? hero.pos);
     return true;
@@ -863,6 +919,13 @@ export class Game {
     hero.hp += hero.maxHp - oldHp;
     hero.mana += hero.maxMana - oldMana;
     this.notify(`${hero.name} 购买了 ${item.name}`, '#80ed99');
+    this.timeline.log({
+      time: this.time,
+      type: 'item_purchase',
+      team: hero.team,
+      actor: hero.name,
+      text: `${hero.name} 购买了 ${item.name}`
+    });
     return true;
   }
 
@@ -882,6 +945,15 @@ export class Game {
     } else if (item.active === 'ward') {
       this.wards.push({ id: newId(), team: hero.team, pos: { ...hero.pos }, ttl: 90 });
       this.notify('侦测守卫已放置', '#8ecae6');
+    }
+    if (item.active) {
+      this.timeline.log({
+        time: this.time,
+        type: 'item_use',
+        team: hero.team,
+        actor: hero.name,
+        text: `${hero.name} 使用了 ${item.name}`
+      });
     }
     return true;
   }
@@ -1027,6 +1099,16 @@ export class Game {
     else if (this.time >= MATCH_DURATION) {
       this.result = this.score[0] >= this.score[1] ? 'victory' : 'defeat';
       if (this.score[0] === this.score[1]) this.result = 'timeout';
+    }
+    if (this.result !== 'running') {
+      const label = this.result === 'victory' ? '胜利' : this.result === 'defeat' ? '失败' : '超时';
+      this.timeline.log({
+        time: this.time,
+        type: 'match_end',
+        text: `比赛结束（${label}）`,
+        pinned: true,
+        dedupeKey: 'match-end'
+      });
     }
   }
 }

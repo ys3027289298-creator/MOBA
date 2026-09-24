@@ -357,7 +357,8 @@ export class ArenaScene extends Phaser.Scene {
       lastHits: player.lastHits,
       gold: player.gold,
       damage: Math.round(player.damageToHeroes),
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      timeline: model.timeline.getEvents()
     };
     saveRecord(record);
     setTimeout(() => this.callbacks.onEnd(record), 600);

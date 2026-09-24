@@ -1,3 +1,5 @@
+import type { TimelineEvent } from './engine/timeline';
+
 export interface MatchRecord {
   result: 'victory' | 'defeat' | 'timeout';
   duration: number;
@@ -9,6 +11,7 @@ export interface MatchRecord {
   gold: number;
   damage: number;
   date: string;
+  timeline?: TimelineEvent[];
 }
 
 export interface Settings {

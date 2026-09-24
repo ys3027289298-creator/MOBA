@@ -43,3 +43,24 @@ button { font-family: inherit; cursor: pointer; }
 .records { width: min(820px, 90vw); max-height: 50vh; overflow: auto; border: 1px solid #2c406e; border-radius: 10px; }
 .records table { width: 100%; border-collapse: collapse; }
 .records th, .records td { padding: 8px; border-bottom: 1px solid #1f3156; text-align: center; }
+.records tr.record-row { cursor: pointer; }
+.records tr.record-row:hover { background: rgba(76,201,240,.08); }
+.timeline-panel { margin-top: 18px; border-top: 1px solid #2c406e; padding-top: 14px; text-align: left; }
+.timeline-title { margin: 0 0 10px; font-size: 18px; color: #8ecae6; }
+.timeline-filters { display: flex; gap: 8px; margin-bottom: 8px; }
+.timeline-filters button { background: #101b35; color: #bfd2ef; border: 1px solid #2c406e; border-radius: 8px; padding: 5px 12px; font-size: 13px; }
+.timeline-filters button.active { border-color: #8ecae6; color: #8ecae6; background: #15284d; }
+.timeline-exports { display: flex; gap: 8px; margin-bottom: 8px; }
+.timeline-exports button { background: #101b35; color: #80ed99; border: 1px solid #2c406e; border-radius: 8px; padding: 5px 12px; font-size: 13px; }
+.timeline-exports button:hover { border-color: #80ed99; }
+.timeline-hint { color: #ffd166; font-size: 12px; min-height: 16px; }
+.timeline-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.timeline-item { display: flex; align-items: center; gap: 10px; background: #101b35; border: 1px solid #1f3156; border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.timeline-time { color: #ffd166; font-variant-numeric: tabular-nums; min-width: 42px; }
+.timeline-team { min-width: 36px; text-align: center; border-radius: 6px; padding: 1px 4px; font-size: 12px; }
+.timeline-team.team-0 { color: #4cc9f0; }
+.timeline-team.team-1 { color: #ff5a5a; }
+.timeline-team.team-none { color: #9fb4d8; }
+.timeline-text { flex: 1; color: #e5eefc; }
+.timeline-category { color: #93a9cd; font-size: 12px; }
+.timeline-empty { color: #9fb4d8; text-align: center; padding: 14px; font-size: 13px; }
