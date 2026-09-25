@@ -66,8 +66,9 @@ export class HUD {
     this.label('items', 500, this.bottom(100), '', 12);
     this.label('events', 16, this.bottom(124), '', 13, '#8ecae6');
     this.label('controls', width - 500, this.bottom(130),
-      '右键移动/攻击｜左键选择｜QWER技能｜DF战术｜1-6道具｜B回城｜空格｜Tab｜滚轮缩放', 12, '#cbd5e1');
+      '右键移动/攻击｜左键选择｜QWER技能｜DF战术｜1-6道具｜B回城｜Alt+点击标记｜滚轮缩放', 12, '#cbd5e1');
     this.label('notifications', width / 2 - 180, 55, '', 16, '#ffe066');
+    this.label('ping', width / 2 - 180, 82, '', 13, '#ffd166');
     this.label('selected', width / 2 - 120, this.bottom(20), '', 12, '#caf0f8');
 
     this.scoreboard = this.scene.add.container(0, 0).setDepth(1300).setScrollFactor(0);
@@ -155,6 +156,11 @@ export class HUD {
     const activeEvent = model.events.find((event) => event.active);
     this.text.get('events')!.setText(`${towerText}  下波兵 ${Math.max(0, model.waveTimer).toFixed(0)}s  ${activeEvent ? `事件: ${activeEvent.name}` : nextEvent ? `${nextEvent.name} ${Math.ceil(nextEvent.startsIn)}s` : ''}`);
     this.text.get('notifications')!.setText(model.notifications.slice(-3).map((n) => n.text).join('\n'));
+    const pings = model.pingSystem;
+    const cdText = pings.cooldown > 0 ? `标记冷却 ${pings.cooldown.toFixed(1)}s` : '';
+    this.text.get('ping')!.setText(
+      pings.lastTextT > 0 ? `标记：${pings.lastText}${cdText ? `｜${cdText}` : ''}` : cdText
+    );
   }
 
   private lastKiller(hero: Hero): string | undefined {

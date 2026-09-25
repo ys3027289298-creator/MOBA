@@ -1,6 +1,15 @@
 import puppeteer from 'puppeteer-core';
+import { existsSync } from 'node:fs';
 
-const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+const edge = [
+  process.env.EDGE_PATH,
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
+].find((p) => p && existsSync(p));
+if (!edge) {
+  console.error('未找到可用的 Edge 浏览器，可设置 EDGE_PATH 环境变量');
+  process.exit(2);
+}
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openGame(hero = 'emberfang', mode = 'full') {
@@ -8,7 +17,7 @@ async function openGame(hero = 'emberfang', mode = 'full') {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle0' });
+  await page.goto(process.env.BASE_URL ?? 'http://127.0.0.1:5173/', { waitUntil: 'networkidle0' });
   await page.evaluate((targetMode) => {
     [...document.querySelectorAll('button')].find((b) => b.textContent.includes(targetMode ? '练习模式' : '完整对战')).click();
   }, mode === 'practice');
@@ -116,8 +125,54 @@ async function defeatFlow() {
 }
 
 const results = [];
+async function pingFlow() {
+  const { browser, page } = await openGame('emberfang', 'practice');
+  const canvas = await page.$('#phaser-container canvas');
+  const box = await canvas.boundingBox();
+  await page.evaluate(() => { window.__starRingGame.paused = false; });
+  const clickAlt = async (x, y) => {
+    await page.keyboard.down('Alt');
+    await page.mouse.click(x, y, { button: 'left' });
+    await page.keyboard.up('Alt');
+  };
+  // 世界点击：Alt+左键画布中心，同点快速重复点击应被冷却拦截
+  await clickAlt(box.x + box.width / 2, box.y + box.height / 2);
+  await wait(150);
+  await clickAlt(box.x + box.width / 2, box.y + box.height / 2);
+  await wait(300);
+  let state = await page.evaluate(() => ({
+    pings: window.__starRingGame.pingSystem.pings.length,
+    views: window.__starRingScene.pingViews.size,
+    pos: { ...window.__starRingGame.pingSystem.pings[0].pos },
+    text: window.__starRingGame.pingSystem.pings[0].text
+  }));
+  if (state.pings !== 1 || state.views !== 1) throw new Error(`世界标记失败 ${JSON.stringify(state)}`);
+  // 小地图点击：Alt+左键小地图区域
+  await wait(900);
+  await clickAlt(box.x + box.width - 120, box.y + box.height - 120);
+  await wait(300);
+  state = await page.evaluate(() => ({
+    pings: window.__starRingGame.pingSystem.pings.length,
+    views: window.__starRingScene.pingViews.size,
+    positions: window.__starRingGame.pingSystem.pings.map((p) => ({ ...p.pos }))
+  }));
+  const inMap = state.positions.every((p) => p.x >= 0 && p.x <= 1680 && p.y >= 0 && p.y <= 1040);
+  if (state.pings !== 2 || state.views !== 2 || !inMap) throw new Error(`小地图标记失败 ${JSON.stringify(state)}`);
+  await page.screenshot({ path: 'screenshot-pings.png' });
+  // 等待自动过期，世界视图与小地图数据同步移除
+  await wait(7400);
+  state = await page.evaluate(() => ({
+    pings: window.__starRingGame.pingSystem.pings.length,
+    views: window.__starRingScene.pingViews.size
+  }));
+  await browser.close();
+  if (state.pings !== 0 || state.views !== 0) throw new Error(`标记过期清理失败 ${JSON.stringify(state)}`);
+  return { name: 'Alt 标记：世界/小地图显示与自动消失', state };
+}
+
 results.push(await basicFlow());
 results.push(await killFlow());
 results.push(await victoryFlow());
 results.push(await defeatFlow());
+results.push(await pingFlow());
 console.log(JSON.stringify(results, null, 2));

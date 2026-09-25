@@ -1,6 +1,15 @@
 import puppeteer from 'puppeteer-core';
+import { existsSync } from 'node:fs';
 
-const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+const edge = [
+  process.env.EDGE_PATH,
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
+].find((p) => p && existsSync(p));
+if (!edge) {
+  console.error('未找到可用的 Edge 浏览器，可设置 EDGE_PATH 环境变量');
+  process.exit(2);
+}
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const browser = await puppeteer.launch({
   executablePath: edge,
@@ -15,7 +24,8 @@ page.on('console', (message) => {
   if (message.type() === 'error') errors.push(message.text());
 });
 
-await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle0' });
+const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:5173/';
+await page.goto(baseUrl, { waitUntil: 'networkidle0' });
 await page.waitForSelector('.logo');
 await page.screenshot({ path: 'screenshot-menu.png' });
 await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('完整对战'))?.click());
