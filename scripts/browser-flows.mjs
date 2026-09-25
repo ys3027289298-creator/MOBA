@@ -116,8 +116,39 @@ async function defeatFlow() {
 }
 
 const results = [];
+async function pingFlow() {
+  const { browser, page } = await openGame('emberfang', 'practice');
+  await page.keyboard.down('Alt');
+  await page.mouse.click(640, 300);
+  await page.keyboard.up('Alt');
+  await wait(300);
+  const data = await page.evaluate(async () => {
+    const game = window.__starRingGame;
+    const scene = window.__starRingScene;
+    const created = game.pings.pings.length === 1 && game.pings.pings[0].type === 'attention';
+    const worldView = scene.pingViews.size === 1;
+    for (let i = 0; i < 20; i++) game.update(0.05);
+    game.tryPing('danger', { x: 900, y: 520 });
+    const second = game.pings.pings.length === 2 && scene.pingViews.size === 2;
+    const minimapPing = game.pings.pings[1];
+    const rect = scene.minimapRect();
+    const onMinimap = minimapPing.pos.x >= 0 && minimapPing.pos.x <= 1680 && rect.w === 220;
+    for (let i = 0; i < 140; i++) game.update(0.05);
+    scene.update(0, 16);
+    const expired = game.pings.pings.length === 0 && scene.pingViews.size === 0;
+    return { created, worldView, second, onMinimap, expired };
+  });
+  await page.screenshot({ path: 'screenshot-ping.png' });
+  await browser.close();
+  if (!data.created || !data.worldView || !data.second || !data.onMinimap || !data.expired) {
+    throw new Error(`标记流程失败 ${JSON.stringify(data)}`);
+  }
+  return { name: 'Alt+点击标记：世界与小地图显示并自动消失', data };
+}
+
 results.push(await basicFlow());
 results.push(await killFlow());
 results.push(await victoryFlow());
 results.push(await defeatFlow());
+results.push(await pingFlow());
 console.log(JSON.stringify(results, null, 2));

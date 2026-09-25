@@ -9,6 +9,7 @@ import { FIRST_WAVE, MATCH_DURATION, MAX_LEVEL, SIEGE_EVERY, WAVE_INTERVAL, xpFo
 import { addStatus, applyDamage, healEntity, moveSpeedMultiplier, nearestEnemy } from './combat';
 import { createBuildings, createHero, createMinion, makeStats, newId, type CombatMinion } from './factory';
 import { skillDefAt } from './skills';
+import { PingManager, type PingResult, type PingType } from './pings';
 import type {
   Building, CastInput, DamageInfo, FloatingText, GameEntity, Hero, KillRecord, Minion,
   Projectile, Status, Team, Vec2
@@ -52,6 +53,7 @@ export class Game {
   baseAlarm: [number, number] = [0, 0];
   notifications: { text: string; t: number; color: string }[] = [];
   pendingEffects: { t: number; action: () => void }[] = [];
+  pings = new PingManager();
   private textId = 1;
 
   constructor(config: GameConfig) {
@@ -105,9 +107,14 @@ export class Game {
 
   update(rawDt: number) {
     this.updateTransient(rawDt);
-    if (this.paused || this.result !== 'running') return;
+    if (this.paused) return;
+    if (this.result !== 'running') {
+      if (this.pings.pings.length > 0 || this.pings.cooldown > 0) this.pings.clear();
+      return;
+    }
     const dt = Math.min(0.05, rawDt) * this.speed;
     this.time += dt;
+    this.pings.update(dt);
     this.spawnWaves(dt);
     this.updateEvents(dt);
     for (const hero of this.heroes) this.updateHero(hero, dt);
@@ -228,6 +235,20 @@ export class Game {
     hero.moveTarget = { ...point };
     hero.attackTargetId = undefined;
     hero.recall = 0;
+  }
+
+  tryPing(type: PingType, pos: Vec2): PingResult {
+    const player = this.player;
+    const canOperate = player.alive && !this.isControlled(player);
+    return this.pings.tryPing({
+      type,
+      team: player.team,
+      pos,
+      now: this.time,
+      canOperate,
+      paused: this.paused,
+      running: this.result === 'running'
+    });
   }
 
   commandAttack(hero: Hero, target: GameEntity) {

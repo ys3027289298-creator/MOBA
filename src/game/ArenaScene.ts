@@ -1,6 +1,10 @@
 import Phaser from 'phaser';
 import { Game } from '../engine/game';
 import { BUSHES, FLANK_ZONES, LANE_POINTS, MAP_H, MAP_W, NEUTRAL_AREA, WALLS } from '../engine/map';
+import {
+  PING_DEFS, isInsideMinimap, minimapToWorld, pingTypeFromEvent, worldToMinimap,
+  type MinimapRect, type Ping, type PingType
+} from '../engine/pings';
 import { getHeroDef, TACTICAL_SKILLS } from '../data/heroes';
 import type { GameEntity, Hero, Vec2 } from '../engine/types';
 import type { MatchRecord } from '../storage';
@@ -24,12 +28,15 @@ export class ArenaScene extends Phaser.Scene {
   callbacks!: SceneCallbacks;
   private renderers = new Map<number, RenderObject>();
   private projectileViews = new Map<number, Phaser.GameObjects.Arc>();
+  private pingViews = new Map<number, Phaser.GameObjects.Container>();
   private skillPreview!: Phaser.GameObjects.Graphics;
   private hud!: HUD;
   private castingSlot: number | null = null;
   private mapGraphics!: Phaser.GameObjects.Graphics;
   private eventGraphics!: Phaser.GameObjects.Graphics;
   private savedRecord = false;
+  private onWindowBlur = () => { this.gameModel.paused = true; };
+  private onPointerLockChange = () => { if (!document.pointerLockElement) this.gameModel.paused = true; };
 
   constructor() { super('arena'); }
 
@@ -38,6 +45,7 @@ export class ArenaScene extends Phaser.Scene {
     this.callbacks = data.callbacks;
     this.renderers.clear();
     this.projectileViews.clear();
+    this.pingViews.clear();
     this.savedRecord = false;
   }
 
@@ -49,6 +57,15 @@ export class ArenaScene extends Phaser.Scene {
     this.eventGraphics = this.add.graphics().setDepth(30);
     this.hud = new HUD(this);
     this.setupInput();
+    (window as unknown as { __starRingScene?: ArenaScene }).__starRingScene = this;
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanupListeners());
+  }
+
+  private cleanupListeners() {
+    window.removeEventListener('blur', this.onWindowBlur);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    for (const view of this.pingViews.values()) view.destroy();
+    this.pingViews.clear();
   }
 
   setPaused(paused: boolean) { this.gameModel.paused = paused; }
@@ -88,11 +105,21 @@ export class ArenaScene extends Phaser.Scene {
   private setupInput() {
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      const mouseEvent = pointer.event as MouseEvent;
+      const pingType = pingTypeFromEvent(
+        { altKey: mouseEvent.altKey, shiftKey: mouseEvent.shiftKey, ctrlKey: mouseEvent.ctrlKey },
+        pointer.rightButtonDown() ? 2 : 0
+      );
+      if (pingType && this.castingSlot === null) {
+        this.handlePing(pointer, pingType);
+        return;
+      }
       if (pointer.rightButtonDown()) this.handleRightClick(pointer);
       if (pointer.leftButtonDown()) this.handleLeftClick(pointer);
       if (pointer.leftButtonDown() && this.isOverMinimap(pointer)) this.handleMinimap(pointer);
     });
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if ((pointer.event as MouseEvent).altKey) return;
       if (pointer.leftButtonDown() && this.isOverMinimap(pointer)) this.handleMinimap(pointer);
     });
     const keys: Array<[string, number]> = [['Q', 0], ['W', 1], ['E', 2], ['R', 3], ['D', 4], ['F', 5]];
@@ -115,10 +142,20 @@ export class ArenaScene extends Phaser.Scene {
     this.input.on('wheel', (_p: Phaser.Input.Pointer, _o: unknown[], _dx: number, dy: number) => {
       this.cameras.main.setZoom(Phaser.Math.Clamp(this.cameras.main.zoom - dy * 0.001, 0.55, 1.6));
     });
-    window.addEventListener('blur', () => { this.gameModel.paused = true; });
-    document.addEventListener('pointerlockchange', () => {
-      if (!document.pointerLockElement) this.gameModel.paused = true;
-    });
+    window.addEventListener('blur', this.onWindowBlur);
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
+  }
+
+  minimapRect(): MinimapRect {
+    return { x: this.scale.width - 235, y: this.scale.height - 185, w: 220, h: 136 };
+  }
+
+  private handlePing(pointer: Phaser.Input.Pointer, type: PingType) {
+    const screen = { x: pointer.x, y: pointer.y };
+    const world = this.isOverMinimap(pointer)
+      ? minimapToWorld(screen, this.minimapRect())
+      : (pointer.positionToCamera(this.cameras.main) as Vec2);
+    this.gameModel.tryPing(type, world);
   }
 
   focusHero() {
@@ -133,15 +170,12 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private isOverMinimap(pointer: Phaser.Input.Pointer): boolean {
-    return pointer.x > this.scale.width - 250 && pointer.y > this.scale.height - 230;
+    return isInsideMinimap({ x: pointer.x, y: pointer.y }, this.minimapRect());
   }
 
   private handleMinimap(pointer: Phaser.Input.Pointer) {
-    const x = this.scale.width - 235;
-    const y = this.scale.height - 215;
-    const tx = Phaser.Math.Clamp((pointer.x - x) / 220, 0, 1) * MAP_W;
-    const ty = Phaser.Math.Clamp((pointer.y - y) / 136, 0, 1) * MAP_H;
-    this.cameras.main.centerOn(tx, ty);
+    const world = minimapToWorld({ x: pointer.x, y: pointer.y }, this.minimapRect());
+    this.cameras.main.centerOn(world.x, world.y);
   }
 
   private handleRightClick(pointer: Phaser.Input.Pointer) {
@@ -185,6 +219,7 @@ export class ArenaScene extends Phaser.Scene {
     this.handlePendingCastClick();
     this.syncEntities();
     this.syncProjectiles();
+    this.syncPings();
     this.drawSkillPreview();
     this.drawEvents();
     this.hud.update();
@@ -268,6 +303,44 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
+  private createPingView(ping: Ping): Phaser.GameObjects.Container {
+    const def = PING_DEFS[ping.type];
+    const container = this.add.container(ping.pos.x, ping.pos.y).setDepth(40);
+    const ring = this.add.circle(0, 0, 18, def.color, 0.18).setStrokeStyle(3, def.color, 0.95);
+    const label = this.add.text(0, -34, ping.text, {
+      color: `#${def.color.toString(16).padStart(6, '0')}`,
+      fontSize: '15px',
+      fontStyle: 'bold',
+      fontFamily: 'Microsoft YaHei, sans-serif',
+      backgroundColor: 'rgba(5,10,20,0.7)',
+      padding: { x: 5, y: 2 }
+    }).setOrigin(0.5);
+    container.add([ring, label]);
+    return container;
+  }
+
+  private syncPings() {
+    const active = new Set<number>();
+    for (const ping of this.gameModel.pings.pings) {
+      if (ping.team !== this.gameModel.player.team) continue;
+      active.add(ping.id);
+      let view = this.pingViews.get(ping.id);
+      if (!view) {
+        view = this.createPingView(ping);
+        this.pingViews.set(ping.id, view);
+      }
+      view.setPosition(ping.pos.x, ping.pos.y);
+      const fading = ping.ttl < 1.5;
+      view.setAlpha(fading ? 0.35 + 0.65 * Math.abs(Math.sin(this.game.loop.time * 0.012)) : 1);
+    }
+    for (const [id, view] of this.pingViews) {
+      if (!active.has(id)) {
+        view.destroy();
+        this.pingViews.delete(id);
+      }
+    }
+  }
+
   private drawSkillPreview() {
     this.skillPreview.clear();
     if (this.castingSlot === null) return;
@@ -316,10 +389,11 @@ export class ArenaScene extends Phaser.Scene {
     g.clear();
     g.scrollFactorX = 0;
     g.scrollFactorY = 0;
-    const ox = this.scale.width - 235;
-    const oy = this.scale.height - 185;
-    const w = 220;
-    const h = 136;
+    const rect = this.minimapRect();
+    const ox = rect.x;
+    const oy = rect.y;
+    const w = rect.w;
+    const h = rect.h;
     g.fillStyle(0x07111f, 0.82).fillRoundedRect(ox - 6, oy - 6, w + 12, h + 12, 8);
     g.lineStyle(2, 0x6c8cce, 0.8).strokeRoundedRect(ox - 6, oy - 6, w + 12, h + 12, 8);
     g.lineStyle(3, 0x465a8c, 0.8);
@@ -340,6 +414,29 @@ export class ArenaScene extends Phaser.Scene {
       if (!minion.alive) continue;
       g.fillStyle(minion.team === 0 ? 0x4cc9f0 : 0xff5a5a, 0.75);
       g.fillRect(ox + minion.pos.x * sx - 1, oy + minion.pos.y * sy - 1, 2, 2);
+    }
+    for (const ping of this.gameModel.pings.pings) {
+      if (ping.team !== this.gameModel.player.team) continue;
+      const def = PING_DEFS[ping.type];
+      const point = worldToMinimap(ping.pos, rect);
+      const flash = 0.45 + 0.55 * Math.abs(Math.sin(this.game.loop.time * 0.01));
+      g.lineStyle(2, def.color, flash);
+      g.strokeCircle(point.x, point.y, 8);
+      g.fillStyle(def.color, 1);
+      if (def.minimap === 'circle') {
+        g.fillCircle(point.x, point.y, 4);
+      } else if (def.minimap === 'square') {
+        g.fillRect(point.x - 3.5, point.y - 3.5, 7, 7);
+      } else if (def.minimap === 'triangle') {
+        g.fillTriangle(point.x, point.y - 5, point.x - 4.5, point.y + 3.5, point.x + 4.5, point.y + 3.5);
+      } else {
+        g.fillPoints([
+          new Phaser.Geom.Point(point.x, point.y - 5),
+          new Phaser.Geom.Point(point.x - 4.5, point.y),
+          new Phaser.Geom.Point(point.x, point.y + 5),
+          new Phaser.Geom.Point(point.x + 4.5, point.y)
+        ], true);
+      }
     }
   }
 
