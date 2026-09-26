@@ -131,6 +131,7 @@ export interface SkillDef {
   name: string;
   description: string;
   targetMode: 'none' | 'point' | 'direction' | 'entity';
+  entityTarget?: 'enemy' | 'ally-hero';
   range: number;
   radius: number;
   cooldown: (level: number) => number;

@@ -198,9 +198,11 @@ export class ArenaScene extends Phaser.Scene {
     if (pointer.leftButtonDown()) {
       const world = pointer.positionToCamera(this.cameras.main) as Vec2;
       const clicked = this.pickEntity(world);
-      this.gameModel.castSkill(this.gameModel.player, this.castingSlot, { point: world, entityId: clicked?.id });
-      this.castingSlot = null;
-      this.skillPreview.clear();
+      const cast = this.gameModel.castSkill(this.gameModel.player, this.castingSlot, { point: world, entityId: clicked?.id });
+      if (cast) {
+        this.castingSlot = null;
+        this.skillPreview.clear();
+      }
     }
   }
 

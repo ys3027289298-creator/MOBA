@@ -13,7 +13,7 @@ export const HEROES: HeroDef[] = [
     base: { maxHp: 620, maxMana: 300, attack: 58, defense: 24, moveSpeed: 315, abilityPower: 30, attackRange: 78, attackInterval: 0.85, hpRegen: 7, manaRegen: 6 },
     growth: { hp: 95, mana: 42, attack: 6.2, defense: 4.2, ap: 6 },
     skills: [
-      { slot: 0, key: 'Q', name: '裂星斩', description: '冲向范围内目标并造成物理伤害。', targetMode: 'entity', range: 260, radius: 60, cooldown: (l) => Math.max(3, 7 - l * 0.5), cost: () => 45, color: 0xff7a4d },
+      { slot: 0, key: 'Q', name: '裂星斩', description: '冲向范围内目标并造成物理伤害。', targetMode: 'entity', entityTarget: 'enemy', range: 260, radius: 60, cooldown: (l) => Math.max(3, 7 - l * 0.5), cost: () => 45, color: 0xff7a4d },
       { slot: 1, key: 'W', name: '熔火护体', description: '获得护盾并提升攻击速度。', targetMode: 'none', range: 0, radius: 0, cooldown: (l) => 13 - l, cost: () => 55, color: 0xffb347 },
       { slot: 2, key: 'E', name: '炽焰横扫', description: '对周围敌人造成范围能量伤害与减速。', targetMode: 'none', range: 0, radius: 180, cooldown: (l) => 10 - l * 0.6, cost: () => 60, color: 0xff4d6d },
       { slot: 3, key: 'R', name: '烬灭千刃', description: '突进并反复斩击目标区域，造成高额伤害与短暂眩晕。', targetMode: 'point', range: 420, radius: 170, cooldown: (l) => 75 - l * 5, cost: () => 100, color: 0xff1f4b }
@@ -53,7 +53,7 @@ export const HEROES: HeroDef[] = [
     skills: [
       { slot: 0, key: 'Q', name: '震地重锤', description: '猛击地面，伤害并眩晕前方敌人。', targetMode: 'direction', range: 230, radius: 120, cooldown: (l) => 9 - l * 0.6, cost: () => 50, color: 0x95d5b2 },
       { slot: 1, key: 'W', name: '星钢壁垒', description: '获得巨额护盾并短暂减免受到的伤害。', targetMode: 'none', range: 0, radius: 0, cooldown: (l) => 16 - l, cost: () => 60, color: 0x74c69d },
-      { slot: 2, key: 'E', name: '斥力冲拳', description: '击退目标并造成物理伤害与沉默。', targetMode: 'entity', range: 170, radius: 70, cooldown: (l) => 12 - l, cost: () => 55, color: 0x52b788 },
+      { slot: 2, key: 'E', name: '斥力冲拳', description: '击退目标并造成物理伤害与沉默。', targetMode: 'entity', entityTarget: 'enemy', range: 170, radius: 70, cooldown: (l) => 12 - l, cost: () => 55, color: 0x52b788 },
       { slot: 3, key: 'R', name: '星环圣域', description: '展开守护领域：治疗友军并持续眩晕踏入的敌人。', targetMode: 'point', range: 300, radius: 230, cooldown: (l) => 85 - l * 6, cost: () => 105, color: 0x40916c }
     ],
     recommended: ['aegis', 'boots', 'bulwark', 'phoenix', 'gauntlet', 'wardstone']
@@ -70,8 +70,8 @@ export const HEROES: HeroDef[] = [
     base: { maxHp: 520, maxMana: 420, attack: 44, defense: 18, moveSpeed: 305, abilityPower: 42, attackRange: 300, attackInterval: 1.0, hpRegen: 6, manaRegen: 11 },
     growth: { hp: 72, mana: 62, attack: 4, defense: 3.2, ap: 8 },
     skills: [
-      { slot: 0, key: 'Q', name: '萤光飞弹', description: '发射追踪飞弹，造成伤害并沉默目标。', targetMode: 'entity', range: 430, radius: 60, cooldown: (l) => 8 - l * 0.5, cost: () => 45, color: 0xb388eb },
-      { slot: 1, key: 'W', name: '春星祝福', description: '治疗自身或一名友方英雄，并提供短暂加速。', targetMode: 'entity', range: 360, radius: 0, cooldown: (l) => 11 - l * 0.7, cost: () => 65, color: 0x9d4edd },
+      { slot: 0, key: 'Q', name: '萤光飞弹', description: '发射追踪飞弹，造成伤害并沉默目标。', targetMode: 'entity', entityTarget: 'enemy', range: 430, radius: 60, cooldown: (l) => 8 - l * 0.5, cost: () => 45, color: 0xb388eb },
+      { slot: 1, key: 'W', name: '春星祝福', description: '治疗自身或一名友方英雄，并提供短暂加速。', targetMode: 'entity', entityTarget: 'ally-hero', range: 360, radius: 0, cooldown: (l) => 11 - l * 0.7, cost: () => 65, color: 0x9d4edd },
       { slot: 2, key: 'E', name: '折光跃步', description: '瞬移至目标点，起点和终点造成能量伤害。', targetMode: 'point', range: 360, radius: 110, cooldown: (l) => 10 - l * 0.6, cost: () => 55, color: 0xe0aaff },
       { slot: 3, key: 'R', name: '星籁交响', description: '大范围持续治疗友军、伤害并减速敌军。', targetMode: 'point', range: 520, radius: 240, cooldown: (l) => 80 - l * 6, cost: () => 110, color: 0x7b2cbf }
     ],
